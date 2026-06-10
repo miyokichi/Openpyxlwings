@@ -484,6 +484,38 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 追加された行や列には罫線を引き直します。
 v1では罫線のみを整え、塗りつぶしやフォント、表示形式の完全コピーは行いません。
 
+### 見出し行の値から罫線テーブルを探す
+
+次のように、左側に行見出し列があり、右側に `amount` のような値列が複数続く表も取得できます。
+
+```text
+header1      header2       amount   amount
+header_col1  header2_col1
+header_col2  header2_col2
+header_col3  header2_col3
+```
+
+`amount` 列が何列あるかわからない場合でも、`value_header_contains="amount"` を指定すると、最初に `amount` を含む列から右側を値領域として扱います。
+その左側は行見出し列になります。
+
+```python
+from openpyxlwings import ExcelWorkbook
+
+with ExcelWorkbook("report.xlsx") as book:
+    table = book.get_bordered_table_by_header(
+        "Sheet1",
+        header_values=["header1", "header2"],
+        value_header_contains="amount",
+    )
+
+    print(table.row_headers)
+    print(table.column_headers)
+    print(table.data)
+```
+
+この例では、`header1` と `header2` が行見出し列、`amount` を含む列が値領域の列見出しになります。
+文字比較はデフォルトで大文字小文字を区別しません。
+
 API 一覧
 --------
 
@@ -505,6 +537,7 @@ from openpyxlwings import ExcelWorkbook
 | `book.clear_contents(sheet, address)` | 指定範囲の値や数式だけを消す |
 | `book.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号で指定範囲の値や数式だけを消す |
 | `book.get_bordered_table(sheet, row, column, header_rows=1, header_columns=0)` | 起点セルを含む罫線テーブルを取得する |
+| `book.get_bordered_table_by_header(sheet, header_values, value_header_contains=...)` | 見出し行の値と値列見出しの文字列から罫線テーブルを取得する |
 | `book.save(path=None)` | 明示的に保存する |
 | `book.close(save=True)` | 開いている内部セッションを閉じる |
 
@@ -561,3 +594,8 @@ tests/
 uv run pytest
 uv build
 ```
+
+ライセンス
+----------
+
+MIT License です。詳細は `LICENSE` を参照してください。

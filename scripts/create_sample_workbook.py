@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "samples" / "openpyxlwings_sample.xlsx"
+FALLBACK_OUTPUT = ROOT / "samples" / "openpyxlwings_sample_new.xlsx"
 
 
 def main() -> None:
@@ -23,10 +24,15 @@ def main() -> None:
 
     create_quick_read_write_sheet(workbook)
     create_bordered_table_sheet(workbook)
+    create_amount_header_sheet(workbook)
     create_broken_table_sheet(workbook)
 
-    workbook.save(OUTPUT)
-    print(OUTPUT)
+    try:
+        workbook.save(OUTPUT)
+        print(OUTPUT)
+    except PermissionError:
+        workbook.save(FALLBACK_OUTPUT)
+        print(FALLBACK_OUTPUT)
 
 
 def create_quick_read_write_sheet(workbook: Workbook) -> None:
@@ -97,6 +103,34 @@ def create_bordered_table_sheet(workbook: Workbook) -> None:
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
     sheet.add_chart(chart, "G4")
+
+
+def create_amount_header_sheet(workbook: Workbook) -> None:
+    sheet = workbook.create_sheet("AmountHeaders")
+    sheet["A1"] = "見出し値から検出する罫線テーブル"
+    sheet["A2"] = "header1/header2 を固定見出し、amount を値領域の見出しとして検出できます。"
+
+    values = [
+        ["header1", "header2", "amount", "amount", "amount forecast"],
+        ["header_col1", "header2_col1", 120, 140, 160],
+        ["header_col2", "header2_col2", 90, 110, 130],
+        ["header_col3", "header2_col3", 70, 85, 100],
+    ]
+    for row_offset, row in enumerate(values, start=4):
+        for column_offset, value in enumerate(row, start=2):
+            cell = sheet.cell(row=row_offset, column=column_offset, value=value)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    style_title(sheet, "A1:G1")
+    style_header(sheet, "B4:F4")
+    apply_grid(sheet, 4, 2, 7, 6)
+    set_widths(sheet, [4, 18, 18, 14, 14, 18, 4])
+
+    sheet["B10"] = "Manual test:"
+    sheet["B11"] = 'table = book.get_bordered_table_by_header("AmountHeaders", ["header1", "header2"], value_header_contains="amount")'
+    sheet["B12"] = "print(table.row_headers); print(table.column_headers); print(table.data)"
+    sheet["B11"].font = Font(name="Consolas", size=10)
+    sheet["B12"].font = Font(name="Consolas", size=10)
 
 
 def create_broken_table_sheet(workbook: Workbook) -> None:

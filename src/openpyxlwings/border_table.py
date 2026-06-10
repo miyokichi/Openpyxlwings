@@ -278,6 +278,75 @@ def detect_bordered_table(
     )
 
 
+def detect_bordered_table_by_header(
+    workbook: ExcelWorkbook,
+    worksheet: Worksheet,
+    sheet: str | None,
+    header_values: list[CellValue],
+    *,
+    value_header_contains: str,
+    header_row: int = 1,
+    match_case: bool = False,
+) -> BorderTable:
+    """Detect a bordered table by fixed header values and value-column text."""
+
+    if not header_values:
+        raise BorderTableShapeError("header_values must contain at least one value.")
+    if header_row < 1:
+        raise BorderTableShapeError("header_row must be 1 or greater.")
+    if not value_header_contains:
+        raise BorderTableShapeError("value_header_contains cannot be empty.")
+
+    header_width = len(header_values)
+    for row in range(1, worksheet.max_row + 1):
+        for column in range(1, worksheet.max_column - header_width + 2):
+            if not _header_values_match(
+                worksheet,
+                row,
+                column,
+                header_values,
+                match_case=match_case,
+            ):
+                continue
+
+            table = detect_bordered_table(
+                workbook,
+                worksheet,
+                sheet,
+                row,
+                column,
+                header_rows=header_row,
+                header_columns=header_width,
+            )
+            table_header_row_index = row - table.start_row + 1
+            if table_header_row_index != header_row:
+                continue
+
+            relative_header_row = table.values[header_row - 1]
+            first_value_column = _find_first_value_header_column(
+                relative_header_row,
+                value_header_contains,
+                match_case=match_case,
+            )
+            if first_value_column is None:
+                continue
+            if first_value_column <= header_width:
+                raise BorderTableShapeError(
+                    "value-header columns must be to the right of header_values."
+                )
+            if first_value_column != header_width + 1:
+                raise BorderTableShapeError(
+                    "header_values must cover every row-header column before the value area."
+                )
+
+            table.header_rows = header_row
+            table.header_columns = first_value_column - 1
+            table._validate_shape()
+            return table
+
+    raise BorderTableNotFoundError("A bordered table matching the header values was not found.")
+
+
 def _validate_bordered_rectangle(
     worksheet: Worksheet,
     start_row: int,
@@ -361,6 +430,45 @@ def _cell_has_any_border(worksheet: Worksheet, row: int, column: int) -> bool:
         _has_side(side)
         for side in (border.top, border.bottom, border.left, border.right)
     )
+
+
+def _header_values_match(
+    worksheet: Worksheet,
+    row: int,
+    column: int,
+    expected_values: list[CellValue],
+    *,
+    match_case: bool,
+) -> bool:
+    for offset, expected in enumerate(expected_values):
+        actual = worksheet.cell(row=row, column=column + offset).value
+        if _normalize_value(actual, match_case=match_case) != _normalize_value(
+            expected,
+            match_case=match_case,
+        ):
+            return False
+    return True
+
+
+def _find_first_value_header_column(
+    values: list[CellValue],
+    text: str,
+    *,
+    match_case: bool,
+) -> int | None:
+    needle = text if match_case else text.casefold()
+    for index, value in enumerate(values, start=1):
+        haystack = "" if value is None else str(value)
+        if not match_case:
+            haystack = haystack.casefold()
+        if needle in haystack:
+            return index
+    return None
+
+
+def _normalize_value(value: CellValue, *, match_case: bool) -> str:
+    normalized = "" if value is None else str(value).strip()
+    return normalized if match_case else normalized.casefold()
 
 
 def _cell_address(row: int, column: int) -> str:

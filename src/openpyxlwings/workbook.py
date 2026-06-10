@@ -11,7 +11,11 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
 from openpyxl.worksheet.worksheet import Worksheet
 
-from openpyxlwings.border_table import BorderTable, detect_bordered_table
+from openpyxlwings.border_table import (
+    BorderTable,
+    detect_bordered_table,
+    detect_bordered_table_by_header,
+)
 from openpyxlwings.exceptions import ExcelWriteError, SheetNotFoundError
 
 CellValue = str | int | float | bool | None
@@ -230,6 +234,42 @@ class ExcelWorkbook:
                 column,
                 header_rows=header_rows,
                 header_columns=header_columns,
+            )
+        finally:
+            workbook.close()
+
+    def get_bordered_table_by_header(
+        self,
+        sheet: str | None,
+        header_values: list[CellValue],
+        *,
+        value_header_contains: str,
+        header_row: int = 1,
+        match_case: bool = False,
+    ) -> BorderTable:
+        """Detect a bordered table by header values and value-column text."""
+
+        workbook = load_workbook(
+            self.path,
+            read_only=False,
+            data_only=self.data_only,
+            keep_vba=self.keep_vba,
+        )
+        try:
+            if sheet is None:
+                worksheet = workbook.active
+            elif sheet in workbook.sheetnames:
+                worksheet = workbook[sheet]
+            else:
+                raise SheetNotFoundError(f"Sheet not found: {sheet}")
+            return detect_bordered_table_by_header(
+                self,
+                worksheet,
+                sheet,
+                header_values,
+                value_header_contains=value_header_contains,
+                header_row=header_row,
+                match_case=match_case,
             )
         finally:
             workbook.close()

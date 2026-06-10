@@ -31,6 +31,28 @@ def make_bordered_workbook(path: Path) -> None:
     workbook.save(path)
 
 
+def make_amount_header_workbook(path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Amount"
+
+    values = [
+        ["header1", "header2", "amount", "amount"],
+        ["header_col1", "header2_col1", 100, 200],
+        ["header_col2", "header2_col2", 300, 400],
+        ["header_col3", "header2_col3", 500, 600],
+    ]
+    thin = Side(style="thin")
+    border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    for row_offset, row in enumerate(values, start=2):
+        for column_offset, value in enumerate(row, start=2):
+            cell = sheet.cell(row=row_offset, column=column_offset)
+            cell.value = value
+            cell.border = border
+
+    workbook.save(path)
+
+
 def test_get_bordered_table_detects_range_and_headers(tmp_path: Path) -> None:
     path = tmp_path / "book.xlsx"
     make_bordered_workbook(path)
@@ -54,6 +76,43 @@ def test_get_bordered_table_detects_range_and_headers(tmp_path: Path) -> None:
     assert table.column_headers == [["2026", "2027"], ["Sales", "Sales"]]
     assert table.row_headers == [["East"], ["West"]]
     assert table.data == [[10, 20], [30, 40]]
+
+
+def test_get_bordered_table_by_header_detects_variable_amount_columns(tmp_path: Path) -> None:
+    path = tmp_path / "amount.xlsx"
+    make_amount_header_workbook(path)
+
+    with ExcelWorkbook(path) as workbook:
+        table = workbook.get_bordered_table_by_header(
+            "Amount",
+            ["header1", "header2"],
+            value_header_contains="amount",
+        )
+
+    assert table.range == "B2:E5"
+    assert table.header_rows == 1
+    assert table.header_columns == 2
+    assert table.column_headers == [["amount", "amount"]]
+    assert table.row_headers == [
+        ["header_col1", "header2_col1"],
+        ["header_col2", "header2_col2"],
+        ["header_col3", "header2_col3"],
+    ]
+    assert table.data == [[100, 200], [300, 400], [500, 600]]
+
+
+def test_get_bordered_table_by_header_is_case_insensitive(tmp_path: Path) -> None:
+    path = tmp_path / "amount.xlsx"
+    make_amount_header_workbook(path)
+
+    with ExcelWorkbook(path) as workbook:
+        table = workbook.get_bordered_table_by_header(
+            "Amount",
+            ["HEADER1", "HEADER2"],
+            value_header_contains="AMOUNT",
+        )
+
+    assert table.range == "B2:E5"
 
 
 def test_border_table_edit_methods_update_values(tmp_path: Path) -> None:
