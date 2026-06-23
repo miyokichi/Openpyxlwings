@@ -17,6 +17,7 @@ from openpyxlwings.border_table import (
     detect_bordered_table_by_header,
 )
 from openpyxlwings.exceptions import ExcelWriteError, SheetNotFoundError
+from openpyxlwings.format import ExtractedMatch, TablePattern, extract_pattern
 
 CellValue = str | int | float | bool | None
 Table = list[list[CellValue]]
@@ -273,6 +274,17 @@ class ExcelWorkbook:
             )
         finally:
             workbook.close()
+
+    def extract(
+        self,
+        pattern: TablePattern,
+        *,
+        sheets: list[str] | None = None,
+        ranges: dict[str, str] | None = None,
+    ) -> list[ExtractedMatch]:
+        """Extract every table matching an Excel format pattern."""
+
+        return extract_pattern(self, pattern, sheets=sheets, ranges=ranges)
 
     def _save_bordered_table(self, table: BorderTable) -> None:
         self._reader.close()

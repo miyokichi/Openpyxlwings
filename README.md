@@ -516,6 +516,151 @@ with ExcelWorkbook("report.xlsx") as book:
 この例では、`header1` と `header2` が行見出し列、`amount` を含む列が値領域の列見出しになります。
 文字比較はデフォルトで大文字小文字を区別しません。
 
+Excelフォーマットから表を抽出する
+----------------------------------
+
+別のExcelファイルを「表のフォーマット定義」として使い、同じ構造を持つ表を対象ブックから自動検索できます。
+フォーマット定義は1シートにつき1パターンで、シート名がパターン名になります。
+
+サンプル:
+
+```text
+samples/extraction_format.xlsx
+samples/extraction_input.xlsx
+```
+
+### フォーマットExcelを作る
+
+`extraction_format.xlsx` の `amount_table` シートには、次のような2行のひな形が入っています。
+
+```text
+header1             header2             {{columns[].header | contains("amount")}}
+{{rows[].header1}}  {{rows[].header2}}  {{rows[].amounts[]:float}}
+```
+
+固定文字とプレースホルダーを、実際の表と同じセル配置で記述します。
+
+| 書式 | 意味 |
+| --- | --- |
+| `{{title}}` | 単一セルを抽出する |
+| `{{rows[].name}}` | 下方向へ繰り返す値を抽出する |
+| `{{columns[].header}}` | 右方向へ繰り返す値を抽出する |
+| `{{rows[].amounts[]}}` | 可変行・可変列の交点を二次元的に抽出する |
+| `:int`, `:float`, `:date` など | 値を指定型へ変換・検証する |
+| `contains("amount")` | セルに指定文字列が含まれることを要求する |
+| `equals("value")` | セルが指定文字列と完全一致することを要求する |
+
+固定文字は対象Excelと完全一致する必要があります。
+空のテンプレートセルは照合対象外です。
+
+### `{{title}}` で単一セルを取得する
+
+繰り返しではない単一セルは、単純な名前のプレースホルダーで取得できます。
+例えば、フォーマットExcelの `report_info` シートを次のように作ります。
+
+```text
+report_title  {{title}}
+report_date   {{report_date:date}}
+```
+
+対象Excelに次の表があるとします。
+
+```text
+report_title  月次売上レポート
+report_date   2026-06-24
+```
+
+```python
+from openpyxlwings import ExcelFormat, ExcelWorkbook
+
+formats = ExcelFormat.load("samples/extraction_format.xlsx")
+pattern = formats["report_info"]
+
+with ExcelWorkbook("samples/extraction_input.xlsx") as book:
+    matches = book.extract(pattern)
+
+report = matches[0]
+print(report.data)
+```
+
+結果:
+
+```python
+{
+    "title": "月次売上レポート",
+    "report_date": date(2026, 6, 24),
+}
+```
+
+数式セルの場合は、計算済みの値が `data["title"]`、数式文字列が `formulas["title"]` に入ります。
+
+### 対象Excelから抽出する
+
+```python
+from openpyxlwings import ExcelFormat, ExcelWorkbook
+
+formats = ExcelFormat.load("samples/extraction_format.xlsx")
+pattern = formats["amount_table"]
+
+with ExcelWorkbook("samples/extraction_input.xlsx") as book:
+    matches = book.extract(pattern)
+
+for match in matches:
+    print(match.sheet)
+    print(match.range)
+    print(match.data)
+```
+
+一致する表が複数ある場合は、シート位置・セル位置の順にすべて返します。
+
+抽出結果の例:
+
+```python
+{
+    "columns": [
+        {"header": "amount"},
+        {"header": "amount forecast"},
+        {"header": "amount final"},
+    ],
+    "rows": [
+        {
+            "header1": "header_col1",
+            "header2": "detail1",
+            "amounts": [100.0, 120.0, 140.0],
+        },
+    ],
+}
+```
+
+`ExtractedMatch` は以下の情報を持ちます。
+
+| 属性 | 内容 |
+| --- | --- |
+| `sheet` | 一致したシート名 |
+| `range` | 一致したセル範囲 |
+| `data` | 計算済み値を意味付きの辞書・リストに変換した結果 |
+| `formulas` | `data` と同じ構造で保持する数式文字列。通常セルは `None` |
+| `source_cells` | `data` と同じ構造で保持する元セルの位置 |
+
+Excelに数式の計算結果が保存されていない場合、`data` の値は `None` でも `formulas` には `=SUM(...)` などの式が入ります。
+
+### 検索対象を絞る
+
+```python
+with ExcelWorkbook("input.xlsx") as book:
+    matches = book.extract(
+        pattern,
+        sheets=["Sheet1", "Sheet2"],
+        ranges={"Sheet1": "A1:Z200"},
+    )
+```
+
+`sheets` でシートを限定できます。
+`ranges` だけを指定した場合は、辞書に含まれるシートと範囲だけを検索します。
+
+v1では、可変行のプロトタイプをフォーマット表の最終行、可変列のプロトタイプを最終列に配置してください。
+YAMLフォーマットと入れ子になった複数階層の繰り返しは、現在未対応です。
+
 API 一覧
 --------
 
@@ -538,6 +683,8 @@ from openpyxlwings import ExcelWorkbook
 | `book.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号で指定範囲の値や数式だけを消す |
 | `book.get_bordered_table(sheet, row, column, header_rows=1, header_columns=0)` | 起点セルを含む罫線テーブルを取得する |
 | `book.get_bordered_table_by_header(sheet, header_values, value_header_contains=...)` | 見出し行の値と値列見出しの文字列から罫線テーブルを取得する |
+| `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
+| `book.extract(pattern, sheets=None, ranges=None)` | フォーマットに一致する表をすべて抽出する |
 | `book.save(path=None)` | 明示的に保存する |
 | `book.close(save=True)` | 開いている内部セッションを閉じる |
 

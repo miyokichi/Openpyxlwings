@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -14,6 +15,8 @@ from openpyxl.utils import get_column_letter
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "samples" / "openpyxlwings_sample.xlsx"
 FALLBACK_OUTPUT = ROOT / "samples" / "openpyxlwings_sample_new.xlsx"
+FORMAT_OUTPUT = ROOT / "samples" / "extraction_format.xlsx"
+EXTRACTION_INPUT_OUTPUT = ROOT / "samples" / "extraction_input.xlsx"
 
 
 def main() -> None:
@@ -33,6 +36,11 @@ def main() -> None:
     except PermissionError:
         workbook.save(FALLBACK_OUTPUT)
         print(FALLBACK_OUTPUT)
+
+    create_extraction_format_workbook(FORMAT_OUTPUT)
+    create_extraction_input_workbook(EXTRACTION_INPUT_OUTPUT)
+    print(FORMAT_OUTPUT)
+    print(EXTRACTION_INPUT_OUTPUT)
 
 
 def create_quick_read_write_sheet(workbook: Workbook) -> None:
@@ -153,6 +161,61 @@ def create_broken_table_sheet(workbook: Workbook) -> None:
     style_title(sheet, "A1:D1")
     style_header(sheet, "B4:C4")
     set_widths(sheet, [4, 18, 12, 30])
+
+
+def create_extraction_format_workbook(path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "amount_table"
+    sheet["B2"] = "header1"
+    sheet["C2"] = "header2"
+    sheet["D2"] = '{{columns[].header | contains("amount")}}'
+    sheet["B3"] = "{{rows[].header1}}"
+    sheet["C3"] = "{{rows[].header2}}"
+    sheet["D3"] = "{{rows[].amounts[]:float}}"
+    apply_grid(sheet, 2, 2, 3, 4)
+    style_header(sheet, "B2:D2")
+    set_widths(sheet, [4, 24, 24, 42])
+
+    info = workbook.create_sheet("report_info")
+    info["B2"] = "report_title"
+    info["C2"] = "{{title}}"
+    info["B3"] = "report_date"
+    info["C3"] = "{{report_date:date}}"
+    apply_grid(info, 2, 2, 3, 3)
+    style_header(info, "B2:B3")
+    set_widths(info, [4, 20, 30])
+    workbook.save(path)
+
+
+def create_extraction_input_workbook(path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    values = [
+        ["header1", "header2", "amount", "amount forecast", "amount final"],
+        ["header_col1", "detail1", 100, 120, 140],
+        ["header_col2", "detail2", 200, 220, 240],
+        ["header_col3", "detail3", 300, 320, 340],
+    ]
+    for row_offset, row in enumerate(values, start=2):
+        for column_offset, value in enumerate(row, start=2):
+            sheet.cell(row=row_offset, column=column_offset, value=value)
+    sheet["D3"] = "=50+50"
+    apply_grid(sheet, 2, 2, 5, 6)
+    style_header(sheet, "B2:F2")
+    set_widths(sheet, [4, 20, 18, 18, 20, 18])
+
+    info = workbook.create_sheet("Info")
+    info["B2"] = "report_title"
+    info["C2"] = "月次売上レポート"
+    info["B3"] = "report_date"
+    info["C3"] = date(2026, 6, 24)
+    info["C3"].number_format = "yyyy-mm-dd"
+    apply_grid(info, 2, 2, 3, 3)
+    style_header(info, "B2:B3")
+    set_widths(info, [4, 20, 30])
+    workbook.save(path)
 
 
 def style_title(sheet, address: str) -> None:
