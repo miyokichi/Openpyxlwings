@@ -202,3 +202,31 @@ def test_border_table_save_delegates_to_workbook() -> None:
 
     assert workbook.saved_table is table
     assert table._insertions == []
+
+
+def test_repeated_bordered_table_reads_reuse_single_file_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "book.xlsx"
+    make_bordered_workbook(path)
+
+    import openpyxlwings.workbook as workbook_module
+
+    styled_opens = 0
+    real_load_workbook = workbook_module.load_workbook
+
+    def counting_load_workbook(*args, **kwargs):
+        nonlocal styled_opens
+        if kwargs.get("read_only") is False:
+            styled_opens += 1
+        return real_load_workbook(*args, **kwargs)
+
+    monkeypatch.setattr(workbook_module, "load_workbook", counting_load_workbook)
+
+    with ExcelWorkbook(path) as workbook:
+        first = workbook.get_bordered_table("Report", 3, 3, header_rows=2, header_columns=1)
+        second = workbook.get_bordered_table("Report", 3, 3, header_rows=2, header_columns=1)
+
+    assert first.range == second.range == "B2:D5"
+    assert styled_opens == 1
