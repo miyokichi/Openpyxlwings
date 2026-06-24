@@ -237,3 +237,35 @@ def test_placeholder_must_match_its_repeat_axes(tmp_path: Path) -> None:
 
     with pytest.raises(FormatDefinitionError):
         ExcelFormat.load(format_path)
+
+
+def test_repeated_extract_reuses_cached_workbooks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    format_path = tmp_path / "formats.xlsx"
+    target_path = tmp_path / "input.xlsx"
+    make_format_workbook(format_path)
+    make_target_workbook(target_path)
+    pattern = ExcelFormat.load(format_path)["amount_table"]
+
+    import openpyxlwings.workbook as workbook_module
+
+    opens = 0
+    real_load_workbook = workbook_module.load_workbook
+
+    def counting_load_workbook(*args, **kwargs):
+        nonlocal opens
+        opens += 1
+        return real_load_workbook(*args, **kwargs)
+
+    monkeypatch.setattr(workbook_module, "load_workbook", counting_load_workbook)
+
+    with ExcelWorkbook(target_path) as workbook:
+        first = workbook.extract(pattern, sheets=["Data"])
+        second = workbook.extract(pattern, sheets=["Data"])
+
+    assert [m.range for m in first] == [m.range for m in second]
+    # values-book reuses the shared read cache; only the formulas-book is the
+    # extra styled open. Two extract calls must not reopen the file again.
+    assert opens == 2

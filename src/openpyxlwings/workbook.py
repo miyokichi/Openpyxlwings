@@ -31,6 +31,11 @@ class ExcelWorkbook:
     Reads are lazy and use openpyxl. Writes are also lazy and use a new Excel
     application instance by default, so this class does not operate on the
     user's already-open Excel windows.
+
+    Reads default to a full (non read-only) load so that cell styles such as
+    borders are available and the same cached workbook serves both value and
+    bordered-table reads. Pass ``read_only=True`` to opt into openpyxl's
+    memory-light streaming mode for value-only reads of very large files.
     """
 
     def __init__(
@@ -38,7 +43,7 @@ class ExcelWorkbook:
         path: str | Path,
         *,
         data_only: bool = True,
-        read_only: bool = True,
+        read_only: bool = False,
         keep_vba: bool = False,
         visible: bool = False,
         update_links: bool = False,
@@ -277,7 +282,7 @@ class _OpenpyxlReadSession:
         self.read_only = read_only
         self.keep_vba = keep_vba
         self._workbook = None
-        self._styled_workbook = None
+        self._styled_workbooks: dict[bool, Any] = {}
 
     @property
     def workbook(self):
@@ -290,29 +295,32 @@ class _OpenpyxlReadSession:
             )
         return self._workbook
 
-    @property
-    def styled_workbook(self):
+    def styled_workbook_for(self, *, data_only: bool):
         # Border/style inspection requires a non-read-only workbook, since
-        # openpyxl's read-only mode does not load cell styles. Cache it so
-        # repeated bordered-table reads do not reopen the file each time.
-        if not self.read_only:
+        # openpyxl's read-only mode does not load cell styles. Cache one per
+        # ``data_only`` flavor so repeated reads do not reopen the file.
+        if not self.read_only and data_only == self.data_only:
             return self.workbook
-        if self._styled_workbook is None:
-            self._styled_workbook = load_workbook(
+        if data_only not in self._styled_workbooks:
+            self._styled_workbooks[data_only] = load_workbook(
                 self.path,
                 read_only=False,
-                data_only=self.data_only,
+                data_only=data_only,
                 keep_vba=self.keep_vba,
             )
-        return self._styled_workbook
+        return self._styled_workbooks[data_only]
+
+    @property
+    def styled_workbook(self):
+        return self.styled_workbook_for(data_only=self.data_only)
 
     def close(self) -> None:
         if self._workbook is not None:
             self._workbook.close()
             self._workbook = None
-        if self._styled_workbook is not None:
-            self._styled_workbook.close()
-            self._styled_workbook = None
+        for workbook in self._styled_workbooks.values():
+            workbook.close()
+        self._styled_workbooks.clear()
 
     def sheet_names(self) -> list[str]:
         return list(self.workbook.sheetnames)
