@@ -80,6 +80,27 @@ def test_at_methods_normalize_to_addresses() -> None:
     assert ops[1].address == "A10:F100"
 
 
+def test_write_values_snapshots_scalar_at_queue_time() -> None:
+    plan = WritePlan()
+    x = 5
+    plan.write_values("Sheet", "A1", x)
+    x = 10  # noqa: F841 - rebinding must not change the queued op
+
+    assert list(plan)[0].values == 5
+
+
+def test_write_values_snapshots_mutable_values_at_queue_time() -> None:
+    plan = WritePlan()
+    row = [1, 2, 3]
+    plan.write_values("Sheet", "A1", row)
+
+    # In-place mutation after queueing must not leak into the queued op.
+    row[0] = 99
+    row.append(4)
+
+    assert list(plan)[0].values == [1, 2, 3]
+
+
 def test_methods_chain_and_clear() -> None:
     plan = (
         WritePlan()

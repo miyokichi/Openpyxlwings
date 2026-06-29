@@ -445,6 +445,17 @@ for path in ["report_a.xlsx", "report_b.xlsx"]:
 行番号・列番号を受け取るメソッド（`write_values_at` / `clear_contents_at`）は、予約した時点で値の検証を行います。
 不正な行番号・列番号を渡すと、`apply()` を待たずにその場で `ValueError` になります。
 
+予約に渡した値は、**予約した時点でスナップショット（コピー）**されます。
+数値や文字列はもちろん、リストや二次元データを渡したあとに元の変数を書き換えても、予約済みの内容は変わりません。
+そのため遅延評価を意識せず、その場の値をそのまま積んでいけます。
+
+```python
+plan = WritePlan()
+row = [1, 2, 3]
+plan.write_values("Sheet", "A1", row)
+row[0] = 99            # 予約済みの内容は [1, 2, 3] のまま
+```
+
 ### 罫線テーブルの編集を予約する
 
 `get_bordered_table()` で取得した罫線テーブルの編集も `WritePlan` に積めます。
@@ -550,6 +561,35 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
 `header_rows` は列見出しの行数、`header_columns` は行見出しの列数です。
 どちらも複数指定できます。
+
+### 内側の罫線が欠けている表を読む
+
+既定では、表の内側のすべての格子線がそろっていることを要求します。
+内側の罫線が一部欠けている表を読みたい場合は、`require_inner_borders=False` を指定します。
+このとき必要なのは**一番外側の枠線だけ**で、表の範囲は罫線でつながったセルの外接矩形から決定します。
+
+```python
+from openpyxlwings import ExcelWorkbook
+
+with ExcelWorkbook("report.xlsx") as book:
+    table = book.get_bordered_table(
+        "Report",
+        row=5,
+        column=3,
+        header_rows=1,
+        header_columns=1,
+        require_inner_borders=False,
+    )
+
+    print(table.range)
+    print(table.data)
+```
+
+内側の格子線は値の読み取りには使っていない（範囲内の全セルをそのまま読む）ため、外枠さえそろっていれば内側がどれだけ欠けていても読み取れます。
+`get_bordered_table_by_header()` にも同じ `require_inner_borders` 引数があります。
+
+この検出は「外枠の外側のセルには罫線がない（＝表は罫線のない余白で囲まれている）」ことを前提にしています。
+別の表とすき間なく隣接していたり、外側に飾り罫線があると、範囲を広く拾ってしまうことがあります。
 
 ### 表の中身を変更する
 
@@ -803,7 +843,7 @@ from openpyxlwings import ExcelWorkbook, WritePlan
 | `book.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号で指定範囲の値や数式だけを消す |
 | `WritePlan()` | 書き込み指示を貯めるオブジェクトを作る |
 | `book.apply(plan, save=True)` | `WritePlan` に貯めた書き込みをまとめて実行する |
-| `book.get_bordered_table(sheet, row, column, header_rows=1, header_columns=0)` | 起点セルを含む罫線テーブルを取得する |
+| `book.get_bordered_table(sheet, row, column, header_rows=1, header_columns=0, require_inner_borders=True)` | 起点セルを含む罫線テーブルを取得する（`require_inner_borders=False` で内側の罫線欠けを許容） |
 | `book.get_bordered_table_by_header(sheet, header_values, value_header_contains=...)` | 見出し行の値と値列見出しの文字列から罫線テーブルを取得する |
 | `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
 | `book.extract(pattern, sheets=None, ranges=None)` | フォーマットに一致する表をすべて抽出する |

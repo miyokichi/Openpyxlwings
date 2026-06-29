@@ -218,46 +218,39 @@ def detect_bordered_table(
     *,
     header_rows: int = 1,
     header_columns: int = 0,
+    require_inner_borders: bool = True,
 ) -> BorderTable:
-    """Detect a rectangular bordered table containing ``row``/``column``."""
+    """Detect a rectangular bordered table containing ``row``/``column``.
+
+    By default every inner gridline must be present. Pass
+    ``require_inner_borders=False`` to tolerate missing inner borders: only the
+    outer frame is required, and the table extent is taken from the bounding
+    box of the connected bordered cells.
+    """
 
     _validate_position(row, column)
     _reject_merged_cell(worksheet, row, column)
 
-    start_row = row
-    end_row = row
-    start_column = column
-    end_column = column
-
-    while (
-        start_row > 1
-        and _has_horizontal_boundary(worksheet, start_row - 1, column)
-        and _cell_has_any_border(worksheet, start_row - 1, column)
-    ):
-        start_row -= 1
-    while (
-        end_row < worksheet.max_row
-        and _has_horizontal_boundary(worksheet, end_row, column)
-        and _cell_has_any_border(worksheet, end_row + 1, column)
-    ):
-        end_row += 1
-    while (
-        start_column > 1
-        and _has_vertical_boundary(worksheet, row, start_column - 1)
-        and _cell_has_any_border(worksheet, row, start_column - 1)
-    ):
-        start_column -= 1
-    while (
-        end_column < worksheet.max_column
-        and _has_vertical_boundary(worksheet, row, end_column)
-        and _cell_has_any_border(worksheet, row, end_column + 1)
-    ):
-        end_column += 1
+    if require_inner_borders:
+        start_row, start_column, end_row, end_column = _walk_inner_bounds(
+            worksheet, row, column
+        )
+    else:
+        start_row, start_column, end_row, end_column = _flood_outer_bounds(
+            worksheet, row, column
+        )
 
     if start_row == end_row or start_column == end_column:
         raise BorderTableNotFoundError("A bordered table was not found from the start cell.")
 
-    _validate_bordered_rectangle(worksheet, start_row, start_column, end_row, end_column)
+    _validate_bordered_rectangle(
+        worksheet,
+        start_row,
+        start_column,
+        end_row,
+        end_column,
+        inner=require_inner_borders,
+    )
     values = [
         [cell.value for cell in row_cells]
         for row_cells in worksheet.iter_rows(
@@ -287,6 +280,7 @@ def detect_bordered_table_by_header(
     value_header_contains: str,
     header_row: int = 1,
     match_case: bool = False,
+    require_inner_borders: bool = True,
 ) -> BorderTable:
     """Detect a bordered table by fixed header values and value-column text."""
 
@@ -317,6 +311,7 @@ def detect_bordered_table_by_header(
                 column,
                 header_rows=header_row,
                 header_columns=header_width,
+                require_inner_borders=require_inner_borders,
             )
             table_header_row_index = row - table.start_row + 1
             if table_header_row_index != header_row:
@@ -347,12 +342,96 @@ def detect_bordered_table_by_header(
     raise BorderTableNotFoundError("A bordered table matching the header values was not found.")
 
 
+def _walk_inner_bounds(
+    worksheet: Worksheet,
+    row: int,
+    column: int,
+) -> tuple[int, int, int, int]:
+    """Find table bounds by following continuous inner gridlines."""
+
+    start_row = end_row = row
+    start_column = end_column = column
+
+    while (
+        start_row > 1
+        and _has_horizontal_boundary(worksheet, start_row - 1, column)
+        and _cell_has_any_border(worksheet, start_row - 1, column)
+    ):
+        start_row -= 1
+    while (
+        end_row < worksheet.max_row
+        and _has_horizontal_boundary(worksheet, end_row, column)
+        and _cell_has_any_border(worksheet, end_row + 1, column)
+    ):
+        end_row += 1
+    while (
+        start_column > 1
+        and _has_vertical_boundary(worksheet, row, start_column - 1)
+        and _cell_has_any_border(worksheet, row, start_column - 1)
+    ):
+        start_column -= 1
+    while (
+        end_column < worksheet.max_column
+        and _has_vertical_boundary(worksheet, row, end_column)
+        and _cell_has_any_border(worksheet, row, end_column + 1)
+    ):
+        end_column += 1
+
+    return start_row, start_column, end_row, end_column
+
+
+def _flood_outer_bounds(
+    worksheet: Worksheet,
+    row: int,
+    column: int,
+) -> tuple[int, int, int, int]:
+    """Find table bounds as the bounding box of connected bordered cells.
+
+    Movement spreads to neighbouring cells that carry any border, so missing
+    inner gridlines do not stop the spread; the outer frame (whose perimeter
+    cells are all bordered) closes the region, and cells outside the frame have
+    no borders and are excluded.
+    """
+
+    max_row = worksheet.max_row
+    max_column = worksheet.max_column
+    start_row = end_row = row
+    start_column = end_column = column
+
+    seen = {(row, column)}
+    stack = [(row, column)]
+    while stack:
+        current_row, current_column = stack.pop()
+        start_row = min(start_row, current_row)
+        end_row = max(end_row, current_row)
+        start_column = min(start_column, current_column)
+        end_column = max(end_column, current_column)
+        for next_row, next_column in (
+            (current_row - 1, current_column),
+            (current_row + 1, current_column),
+            (current_row, current_column - 1),
+            (current_row, current_column + 1),
+        ):
+            if not (1 <= next_row <= max_row and 1 <= next_column <= max_column):
+                continue
+            if (next_row, next_column) in seen:
+                continue
+            if not _cell_has_any_border(worksheet, next_row, next_column):
+                continue
+            seen.add((next_row, next_column))
+            stack.append((next_row, next_column))
+
+    return start_row, start_column, end_row, end_column
+
+
 def _validate_bordered_rectangle(
     worksheet: Worksheet,
     start_row: int,
     start_column: int,
     end_row: int,
     end_column: int,
+    *,
+    inner: bool = True,
 ) -> None:
     for row in range(start_row, end_row + 1):
         for column in range(start_column, end_column + 1):
@@ -369,6 +448,9 @@ def _validate_bordered_rectangle(
             raise BorderTableShapeError("table left border is incomplete.")
         if not _has_right_border(worksheet, row, end_column):
             raise BorderTableShapeError("table right border is incomplete.")
+
+    if not inner:
+        return
 
     for row in range(start_row, end_row):
         for column in range(start_column, end_column + 1):

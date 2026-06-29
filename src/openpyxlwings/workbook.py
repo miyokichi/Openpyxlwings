@@ -235,8 +235,13 @@ class ExcelWorkbook:
         *,
         header_rows: int = 1,
         header_columns: int = 0,
+        require_inner_borders: bool = True,
     ) -> BorderTable:
-        """Detect a bordered table that contains ``row``/``column``."""
+        """Detect a bordered table that contains ``row``/``column``.
+
+        Pass ``require_inner_borders=False`` to read tables whose inner
+        gridlines are partly missing; only the outer frame is required.
+        """
 
         worksheet = self._reader.styled_sheet(sheet)
         return detect_bordered_table(
@@ -247,6 +252,7 @@ class ExcelWorkbook:
             column,
             header_rows=header_rows,
             header_columns=header_columns,
+            require_inner_borders=require_inner_borders,
         )
 
     def get_bordered_table_by_header(
@@ -257,6 +263,7 @@ class ExcelWorkbook:
         value_header_contains: str,
         header_row: int = 1,
         match_case: bool = False,
+        require_inner_borders: bool = True,
     ) -> BorderTable:
         """Detect a bordered table by header values and value-column text."""
 
@@ -269,6 +276,7 @@ class ExcelWorkbook:
             value_header_contains=value_header_contains,
             header_row=header_row,
             match_case=match_case,
+            require_inner_borders=require_inner_borders,
         )
 
     def extract(

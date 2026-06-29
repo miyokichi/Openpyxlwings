@@ -9,6 +9,7 @@ Excel session only at that point.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -84,9 +85,13 @@ class WritePlan:
         *,
         expand: bool = False,
     ) -> WritePlan:
-        """Queue a write of a scalar, row, column, or 2-D values at ``cell``."""
+        """Queue a write of a scalar, row, column, or 2-D values at ``cell``.
 
-        self._ops.append(_WriteValuesOp(sheet, cell, values, expand))
+        ``values`` is snapshotted now, so the queued write reflects the value at
+        this point even if the original object is mutated or rebound later.
+        """
+
+        self._ops.append(_WriteValuesOp(sheet, cell, deepcopy(values), expand))
         return self
 
     def write_values_at(

@@ -180,6 +180,104 @@ def test_get_bordered_table_rejects_missing_internal_border(tmp_path: Path) -> N
             reader.get_bordered_table("Broken", 1, 1)
 
 
+def make_missing_inner_border_workbook(path: Path) -> None:
+    """A 3x3 framed table whose middle vertical gridline is absent."""
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Partial"
+    values = [
+        ["Region", "Q1", "Q2"],
+        ["East", 10, 20],
+        ["West", 30, 40],
+    ]
+    thin = Side(style="thin")
+    full = Border(top=thin, bottom=thin, left=thin, right=thin)
+    no_right = Border(top=thin, bottom=thin, left=thin)
+    no_left = Border(top=thin, bottom=thin, right=thin)
+    for row_offset, row in enumerate(values, start=2):       # rows 2..4
+        for column_offset, value in enumerate(row, start=2):  # cols 2..4 (table cols 1..3)
+            cell = sheet.cell(row=row_offset, column=column_offset)
+            cell.value = value
+            if column_offset == 2:        # left table column: drop its right edge
+                cell.border = no_right
+            elif column_offset == 3:      # middle column: drop its left edge
+                cell.border = no_left
+            else:                         # right table column: full
+                cell.border = full
+    workbook.save(path)
+
+
+def test_require_inner_borders_false_reads_table_with_missing_inner_border(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "book.xlsx"
+    make_missing_inner_border_workbook(path)
+
+    with ExcelWorkbook(path) as reader:
+        table = reader.get_bordered_table(
+            "Partial",
+            3,
+            3,
+            header_rows=1,
+            header_columns=1,
+            require_inner_borders=False,
+        )
+
+    assert table.range == "B2:D4"
+    assert table.values == [
+        ["Region", "Q1", "Q2"],
+        ["East", 10, 20],
+        ["West", 30, 40],
+    ]
+
+
+def test_missing_inner_border_still_rejected_by_default(tmp_path: Path) -> None:
+    path = tmp_path / "book.xlsx"
+    make_missing_inner_border_workbook(path)
+
+    with ExcelWorkbook(path) as reader:
+        with pytest.raises(BorderTableShapeError):
+            reader.get_bordered_table("Partial", 3, 3, header_rows=1, header_columns=1)
+
+
+def test_require_inner_borders_false_reads_with_borderless_inner_cell(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "book.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Hole"
+    values = [
+        ["Region", "Q1", "Q2"],
+        ["East", 10, 20],
+        ["West", 30, 40],
+    ]
+    thin = Side(style="thin")
+    full = Border(top=thin, bottom=thin, left=thin, right=thin)
+    for row_offset, row in enumerate(values, start=2):
+        for column_offset, value in enumerate(row, start=2):
+            cell = sheet.cell(row=row_offset, column=column_offset)
+            cell.value = value
+            cell.border = full
+    # Center body cell loses every border.
+    sheet.cell(row=3, column=3).border = Border()
+    workbook.save(path)
+
+    with ExcelWorkbook(path) as reader:
+        table = reader.get_bordered_table(
+            "Hole",
+            2,
+            2,
+            header_rows=1,
+            header_columns=1,
+            require_inner_borders=False,
+        )
+
+    assert table.range == "B2:D4"
+    assert table.values[1][1] == 10
+
+
 def test_border_table_save_delegates_to_workbook() -> None:
     class FakeWorkbook:
         def __init__(self) -> None:
