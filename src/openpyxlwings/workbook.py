@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import xlwings as xw
 from openpyxl import load_workbook
@@ -18,6 +18,9 @@ from openpyxlwings.border_table import (
 )
 from openpyxlwings.exceptions import ExcelWriteError, SheetNotFoundError
 from openpyxlwings.format import ExtractedMatch, TablePattern, extract_pattern
+
+if TYPE_CHECKING:
+    from openpyxlwings.plan import WritePlan
 
 CellValue = str | int | float | bool | None
 Table = list[list[CellValue]]
@@ -207,6 +210,22 @@ class ExcelWorkbook:
             end_row,
             end_column,
         )
+
+    def apply(self, plan: WritePlan, *, save: bool = True) -> None:
+        """Execute every queued operation in ``plan`` against this workbook.
+
+        The Excel write session is opened lazily on the first operation, so an
+        empty plan never starts Excel. The plan is not consumed and may be
+        applied again.
+        """
+
+        if not len(plan):
+            return
+        self._reader.close()
+        for op in plan:
+            op.apply(self._writer)
+        if save:
+            self._writer.save()
 
     def get_bordered_table(
         self,
@@ -550,26 +569,37 @@ class _XlwingsWriteSession:
         )
 
     def save_bordered_table(self, table: BorderTable) -> None:
-        for insertion in table._insertions:
-            if insertion.axis == "row":
-                self.insert_row(table.sheet, insertion.index)
-            else:
-                self.insert_column(table.sheet, insertion.index)
-
-        self.write_values_at(
+        self.apply_bordered_table(
             table.sheet,
             table.start_row,
             table.start_column,
             table.values,
-        )
-        self.apply_table_borders(
-            table.sheet,
-            table.start_row,
-            table.start_column,
             table.end_row,
             table.end_column,
+            [(insertion.axis, insertion.index) for insertion in table._insertions],
         )
         self.save()
+
+    def apply_bordered_table(
+        self,
+        sheet: str | None,
+        start_row: int,
+        start_column: int,
+        values: Table,
+        end_row: int,
+        end_column: int,
+        insertions: Sequence[tuple[str, int]],
+    ) -> None:
+        """Write an edited bordered table back without saving the workbook."""
+
+        for axis, index in insertions:
+            if axis == "row":
+                self.insert_row(sheet, index)
+            else:
+                self.insert_column(sheet, index)
+
+        self.write_values_at(sheet, start_row, start_column, values)
+        self.apply_table_borders(sheet, start_row, start_column, end_row, end_column)
 
     def insert_row(self, sheet: str | None, row: int) -> None:
         _validate_position(row, 1)

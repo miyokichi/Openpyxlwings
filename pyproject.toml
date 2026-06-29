@@ -49,3 +49,7 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "excel: tests that drive a real Excel install via xlwings (auto-skipped when Excel is unavailable).",
+]
+

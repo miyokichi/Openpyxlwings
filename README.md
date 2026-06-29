@@ -380,6 +380,126 @@ from openpyxlwings import write_values_at
 write_values_at("report.xlsx", "Summary", row=2, column=2, values="完了")
 ```
 
+書き込み指示を貯めてから実行する（WritePlan）
+----------------------------------------------
+
+`WritePlan` を使うと、書き込み内容を `with` ブロックの外で先に組み立てておき、`with` ブロック内の好きなタイミングで `book.apply()` を呼んでまとめて実行できます。
+
+```python
+from openpyxlwings import ExcelWorkbook, WritePlan
+
+# with の外で書き込み指示を組み立ててキャッシュしておく
+plan = WritePlan()
+plan.write_values("Summary", "B2", "更新済み")
+plan.write_values("Summary", "B3", "2026-06-11")
+plan.clear_contents("Data", "A2:F1000")
+plan.write_values("Data", "A2", [
+    ["Alice", 95, "Sales"],
+    ["Bob", 88, "Marketing"],
+])
+
+# with の中の特定のタイミングで、貯めた指示をまとめて実行する
+with ExcelWorkbook("report.xlsx", visible=False) as book:
+    current = book.read_cell("Summary", "A1")   # 読み取りはこれまで通り使える
+    book.apply(plan)
+```
+
+`WritePlan` は Excel も `xlwings` も使わない、書き込み指示を貯めるだけのオブジェクトです。
+`book.apply()` を呼ぶまで Excel は起動しません。
+そのため、`apply()` を呼ぶより前であれば、`with` ブロック内でも `openpyxl` による読み取りを続けて使えます。
+
+メソッドは `ExcelWorkbook` の書き込みメソッドと同じ名前・引数です。
+`self` を返すので、続けて書く（メソッドチェーン）こともできます。
+
+```python
+plan = (
+    WritePlan()
+    .write_values_at("Data", row=2, column=1, values=[[1, 2], [3, 4]])
+    .clear_contents_at("Data", start_row=10, start_column=1, end_row=100, end_column=6)
+)
+```
+
+`WritePlan` で使えるメソッド:
+
+| メソッド | 内容 |
+| --- | --- |
+| `plan.write_values(sheet, cell, values, expand=False)` | セルまたは範囲への書き込みを予約する |
+| `plan.write_values_at(sheet, row, column, values, expand=False)` | 行番号・列番号での書き込みを予約する |
+| `plan.clear_contents(sheet, address)` | 指定範囲のクリアを予約する |
+| `plan.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号での範囲クリアを予約する |
+| `plan.add_bordered_table(table)` | 罫線テーブルの編集内容（スナップショット）を予約する |
+| `plan.clear()` | 予約した指示をすべて取り消す |
+| `len(plan)` | 予約済みの指示の数を返す |
+
+予約した指示は `for op in plan:` で確認できます。
+`apply()` はプランを消費しないため、同じ `WritePlan` を複数のブックへ適用することもできます。
+
+```python
+plan = WritePlan().write_values("Summary", "B2", "確定")
+
+for path in ["report_a.xlsx", "report_b.xlsx"]:
+    with ExcelWorkbook(path, visible=False) as book:
+        book.apply(plan)
+```
+
+行番号・列番号を受け取るメソッド（`write_values_at` / `clear_contents_at`）は、予約した時点で値の検証を行います。
+不正な行番号・列番号を渡すと、`apply()` を待たずにその場で `ValueError` になります。
+
+### 罫線テーブルの編集を予約する
+
+`get_bordered_table()` で取得した罫線テーブルの編集も `WritePlan` に積めます。
+罫線テーブルの検出は `openpyxl` による読み取りなので Excel は起動しません。
+編集（`set_value` / `add_row` など）はすべてメモリ上の操作なので、`apply()` を呼ぶまで Excel への書き込みは発生しません。
+
+検出・編集は Excel を起動しないので、`with` を使わずに1つの `book` で書けます。
+`book.apply(plan)` で初めて Excel が起動するため、最後に `book.close()` で Excel を閉じてください。
+
+```python
+from openpyxlwings import ExcelWorkbook, WritePlan
+
+plan = WritePlan()
+book = ExcelWorkbook("report.xlsx")
+
+# 検出と編集（ここまで Excel は起動しない・すべてメモリ上）
+table = book.get_bordered_table("Report", row=5, column=3, header_rows=1, header_columns=1)
+table.set_value(row=2, column=2, value=99)
+table.add_row([100, 200, 300], row_headers=["新規"])
+plan.add_bordered_table(table)        # ← 編集内容をスナップショットして予約
+# ... 途中で plan.write_values(...) などを直感的に追加 ...
+
+book.apply(plan)   # ← ここで初めて Excel を1回起動し、まとめて書き込み・保存
+book.close()       # ← 起動した Excel を閉じる（apply 後は必須）
+```
+
+`book.close()` は「起動した Excel を終了してファイルを解放する」ためのものです。
+保存自体は `apply()`（`save=True` 既定）で済んでいるので、`close()` の主目的は Excel プロセスの後始末です。
+`apply()` を呼ぶ前なら Excel は起動していないため、検出・編集だけで終える場合は `close()` を省略しても実害はありません。
+
+`with` を使わない場合は自動クリーンアップが効かないので、`apply()` 前後で例外が起きても確実に Excel を閉じたいときは try/finally が安全です。
+
+```python
+from openpyxlwings import ExcelWorkbook, WritePlan
+
+plan = WritePlan()
+book = ExcelWorkbook("report.xlsx")
+try:
+    table = book.get_bordered_table("Report", row=5, column=3, header_rows=1, header_columns=1)
+    table.set_value(row=2, column=2, value=99)
+    table.add_row([100, 200, 300], row_headers=["新規"])
+    plan.add_bordered_table(table)
+    book.apply(plan)
+finally:
+    book.close()
+```
+
+`plan.add_bordered_table(table)` は、予約した時点のテーブルの値・範囲・行/列挿入を**スナップショット（コピー）**します。
+そのため、予約した後に同じ `table` をさらに編集しても、予約済みの内容は変わりません。
+
+`table.save()` が「Excel へ反映＋保存」までを即座に行うのに対し、`plan.add_bordered_table()` は反映も保存も `book.apply()` のタイミングまで遅延します。
+
+`book.apply(plan, save=False)` のように `save=False` を渡すと、保存せずに書き込みだけ行います。
+その場合でも、`with` ブロックを正常に抜けるときに自動で保存されます。
+
 帳票テンプレートに値を流し込む例
 ------------------------------
 
@@ -665,7 +785,7 @@ API 一覧
 --------
 
 ```python
-from openpyxlwings import ExcelWorkbook
+from openpyxlwings import ExcelWorkbook, WritePlan
 ```
 
 | API | 内容 |
@@ -681,6 +801,8 @@ from openpyxlwings import ExcelWorkbook
 | `book.write_values_at(sheet, row, column, values)` | 行番号・列番号で値を書き込む |
 | `book.clear_contents(sheet, address)` | 指定範囲の値や数式だけを消す |
 | `book.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号で指定範囲の値や数式だけを消す |
+| `WritePlan()` | 書き込み指示を貯めるオブジェクトを作る |
+| `book.apply(plan, save=True)` | `WritePlan` に貯めた書き込みをまとめて実行する |
 | `book.get_bordered_table(sheet, row, column, header_rows=1, header_columns=0)` | 起点セルを含む罫線テーブルを取得する |
 | `book.get_bordered_table_by_header(sheet, header_values, value_header_contains=...)` | 見出し行の値と値列見出しの文字列から罫線テーブルを取得する |
 | `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
