@@ -31,6 +31,11 @@ class ExcelWorkbook:
     Reads are lazy and use openpyxl. Writes are also lazy and use a new Excel
     application instance by default, so this class does not operate on the
     user's already-open Excel windows.
+
+    Reads default to a full (non read-only) load so that cell styles such as
+    borders are available and the same cached workbook serves both value and
+    bordered-table reads. Pass ``read_only=True`` to opt into openpyxl's
+    memory-light streaming mode for value-only reads of very large files.
     """
 
     def __init__(
@@ -38,7 +43,7 @@ class ExcelWorkbook:
         path: str | Path,
         *,
         data_only: bool = True,
-        read_only: bool = True,
+        read_only: bool = False,
         keep_vba: bool = False,
         visible: bool = False,
         update_links: bool = False,
@@ -214,30 +219,16 @@ class ExcelWorkbook:
     ) -> BorderTable:
         """Detect a bordered table that contains ``row``/``column``."""
 
-        workbook = load_workbook(
-            self.path,
-            read_only=False,
-            data_only=self.data_only,
-            keep_vba=self.keep_vba,
+        worksheet = self._reader.styled_sheet(sheet)
+        return detect_bordered_table(
+            self,
+            worksheet,
+            sheet,
+            row,
+            column,
+            header_rows=header_rows,
+            header_columns=header_columns,
         )
-        try:
-            if sheet is None:
-                worksheet = workbook.active
-            elif sheet in workbook.sheetnames:
-                worksheet = workbook[sheet]
-            else:
-                raise SheetNotFoundError(f"Sheet not found: {sheet}")
-            return detect_bordered_table(
-                self,
-                worksheet,
-                sheet,
-                row,
-                column,
-                header_rows=header_rows,
-                header_columns=header_columns,
-            )
-        finally:
-            workbook.close()
 
     def get_bordered_table_by_header(
         self,
@@ -250,30 +241,16 @@ class ExcelWorkbook:
     ) -> BorderTable:
         """Detect a bordered table by header values and value-column text."""
 
-        workbook = load_workbook(
-            self.path,
-            read_only=False,
-            data_only=self.data_only,
-            keep_vba=self.keep_vba,
+        worksheet = self._reader.styled_sheet(sheet)
+        return detect_bordered_table_by_header(
+            self,
+            worksheet,
+            sheet,
+            header_values,
+            value_header_contains=value_header_contains,
+            header_row=header_row,
+            match_case=match_case,
         )
-        try:
-            if sheet is None:
-                worksheet = workbook.active
-            elif sheet in workbook.sheetnames:
-                worksheet = workbook[sheet]
-            else:
-                raise SheetNotFoundError(f"Sheet not found: {sheet}")
-            return detect_bordered_table_by_header(
-                self,
-                worksheet,
-                sheet,
-                header_values,
-                value_header_contains=value_header_contains,
-                header_row=header_row,
-                match_case=match_case,
-            )
-        finally:
-            workbook.close()
 
     def extract(
         self,
@@ -305,6 +282,7 @@ class _OpenpyxlReadSession:
         self.read_only = read_only
         self.keep_vba = keep_vba
         self._workbook = None
+        self._styled_workbooks: dict[bool, Any] = {}
 
     @property
     def workbook(self):
@@ -317,16 +295,44 @@ class _OpenpyxlReadSession:
             )
         return self._workbook
 
+    def styled_workbook_for(self, *, data_only: bool):
+        # Border/style inspection requires a non-read-only workbook, since
+        # openpyxl's read-only mode does not load cell styles. Cache one per
+        # ``data_only`` flavor so repeated reads do not reopen the file.
+        if not self.read_only and data_only == self.data_only:
+            return self.workbook
+        if data_only not in self._styled_workbooks:
+            self._styled_workbooks[data_only] = load_workbook(
+                self.path,
+                read_only=False,
+                data_only=data_only,
+                keep_vba=self.keep_vba,
+            )
+        return self._styled_workbooks[data_only]
+
+    @property
+    def styled_workbook(self):
+        return self.styled_workbook_for(data_only=self.data_only)
+
     def close(self) -> None:
         if self._workbook is not None:
             self._workbook.close()
             self._workbook = None
+        for workbook in self._styled_workbooks.values():
+            workbook.close()
+        self._styled_workbooks.clear()
 
     def sheet_names(self) -> list[str]:
         return list(self.workbook.sheetnames)
 
     def sheet(self, name: str | None = None) -> Worksheet:
-        workbook = self.workbook
+        return self._resolve_sheet(self.workbook, name)
+
+    def styled_sheet(self, name: str | None = None) -> Worksheet:
+        return self._resolve_sheet(self.styled_workbook, name)
+
+    @staticmethod
+    def _resolve_sheet(workbook, name: str | None) -> Worksheet:
         if name is None:
             return workbook.active
         if name not in workbook.sheetnames:

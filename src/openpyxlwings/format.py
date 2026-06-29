@@ -210,55 +210,54 @@ def extract_pattern(
 ) -> list[ExtractedMatch]:
     """Find and extract every target table matching ``pattern``."""
 
-    values_book = load_workbook(workbook.path, read_only=False, data_only=True)
-    formulas_book = load_workbook(workbook.path, read_only=False, data_only=False)
-    try:
-        selected_sheets = sheets or (list(ranges) if ranges else list(values_book.sheetnames))
-        unknown = [name for name in selected_sheets if name not in values_book.sheetnames]
-        if unknown:
-            raise FormatMatchError(f"Sheets not found: {', '.join(unknown)}")
-        if pattern.anchor is None and not ranges:
-            raise FormatMatchError(
-                "Patterns without a fixed literal require an explicit ranges argument."
-            )
+    # Reuse the workbook's cached sessions instead of reopening the file.
+    # Both flavors are styled (read_only=False) so border detection works.
+    values_book = workbook._reader.styled_workbook_for(data_only=True)
+    formulas_book = workbook._reader.styled_workbook_for(data_only=False)
 
-        matches: list[ExtractedMatch] = []
-        seen: set[tuple[str, int, int, int, int]] = set()
-        for sheet_name in selected_sheets:
-            values_sheet = values_book[sheet_name]
-            formulas_sheet = formulas_book[sheet_name]
-            search_bounds = _search_bounds(values_sheet, None if ranges is None else ranges.get(sheet_name))
-            for candidate_row, candidate_column in _candidate_origins(
-                values_sheet,
-                pattern,
-                search_bounds,
-            ):
-                try:
-                    bounds = _detect_candidate_bounds(
-                        workbook,
-                        values_sheet,
-                        candidate_row,
-                        candidate_column,
-                    )
-                    if not _bounds_within(bounds, search_bounds):
-                        continue
-                    key = (sheet_name, *bounds)
-                    if key in seen:
-                        continue
-                    match = _match_and_extract(
-                        pattern,
-                        values_sheet,
-                        formulas_sheet,
-                        bounds,
-                    )
-                except (BorderTableNotFoundError, BorderTableShapeError, FormatValueError):
+    selected_sheets = sheets or (list(ranges) if ranges else list(values_book.sheetnames))
+    unknown = [name for name in selected_sheets if name not in values_book.sheetnames]
+    if unknown:
+        raise FormatMatchError(f"Sheets not found: {', '.join(unknown)}")
+    if pattern.anchor is None and not ranges:
+        raise FormatMatchError(
+            "Patterns without a fixed literal require an explicit ranges argument."
+        )
+
+    matches: list[ExtractedMatch] = []
+    seen: set[tuple[str, int, int, int, int]] = set()
+    for sheet_name in selected_sheets:
+        values_sheet = values_book[sheet_name]
+        formulas_sheet = formulas_book[sheet_name]
+        search_bounds = _search_bounds(values_sheet, None if ranges is None else ranges.get(sheet_name))
+        for candidate_row, candidate_column in _candidate_origins(
+            values_sheet,
+            pattern,
+            search_bounds,
+        ):
+            try:
+                bounds = _detect_candidate_bounds(
+                    workbook,
+                    values_sheet,
+                    candidate_row,
+                    candidate_column,
+                )
+                if not _bounds_within(bounds, search_bounds):
                     continue
-                seen.add(key)
-                matches.append(match)
-        return sorted(matches, key=lambda item: (selected_sheets.index(item.sheet), _range_sort_key(item.range)))
-    finally:
-        values_book.close()
-        formulas_book.close()
+                key = (sheet_name, *bounds)
+                if key in seen:
+                    continue
+                match = _match_and_extract(
+                    pattern,
+                    values_sheet,
+                    formulas_sheet,
+                    bounds,
+                )
+            except (BorderTableNotFoundError, BorderTableShapeError, FormatValueError):
+                continue
+            seen.add(key)
+            matches.append(match)
+    return sorted(matches, key=lambda item: (selected_sheets.index(item.sheet), _range_sort_key(item.range)))
 
 
 def _parse_pattern_sheet(worksheet: Worksheet) -> TablePattern:
