@@ -3,6 +3,7 @@
 from openpyxlwings.border_table import BorderTable
 from openpyxlwings.format import ExcelFormat, ExtractedMatch, Placeholder, TablePattern
 from openpyxlwings.plan import WritePlan
+from openpyxlwings.selected_columns import SelectedColumnsTable
 from openpyxlwings.workbook import (
     ExcelWorkbook,
     read_cell_at,
@@ -27,6 +28,7 @@ __all__ = [
     "ExcelWriter",
     "ExtractedMatch",
     "Placeholder",
+    "SelectedColumnsTable",
     "TablePattern",
     "WritePlan",
     "read_cell_at",

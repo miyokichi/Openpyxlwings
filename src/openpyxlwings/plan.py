@@ -13,10 +13,17 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from openpyxlwings.workbook import RangeValue, Table, _cell_address, _range_address
+from openpyxlwings.workbook import (
+    CellValue,
+    RangeValue,
+    Table,
+    _cell_address,
+    _range_address,
+)
 
 if TYPE_CHECKING:
     from openpyxlwings.border_table import BorderTable
+    from openpyxlwings.selected_columns import SelectedColumnsTable
     from openpyxlwings.workbook import _XlwingsWriteSession
 
 
@@ -62,7 +69,31 @@ class _BorderedTableOp:
         )
 
 
-_WriteOp = _WriteValuesOp | _ClearContentsOp | _BorderedTableOp
+@dataclass(frozen=True)
+class _SelectedColumnsTableOp:
+    sheet: str | None
+    start_row: int
+    start_column: int
+    end_row: int
+    end_column: int
+    header_row: int
+    added_rows: int
+    columns: tuple[tuple[int | None, CellValue, tuple[CellValue, ...]], ...]
+
+    def apply(self, writer: _XlwingsWriteSession) -> None:
+        writer.apply_selected_columns_table(
+            self.sheet,
+            self.start_row,
+            self.start_column,
+            self.end_row,
+            self.end_column,
+            self.header_row,
+            self.added_rows,
+            [(source, header, list(values)) for source, header, values in self.columns],
+        )
+
+
+_WriteOp = _WriteValuesOp | _ClearContentsOp | _BorderedTableOp | _SelectedColumnsTableOp
 
 
 class WritePlan:
@@ -147,6 +178,32 @@ class WritePlan:
                 end_column=table.end_column,
                 insertions=tuple(
                     (insertion.axis, insertion.index) for insertion in table._insertions
+                ),
+            )
+        )
+        return self
+
+    def add_selected_columns_table(self, table: SelectedColumnsTable) -> WritePlan:
+        """Queue an edited column-selected virtual table to be written back.
+
+        A snapshot of the table's current columns, values, bounds, and appended
+        row count is taken now, so later edits to ``table`` do not affect what
+        this plan writes. Unlike :meth:`SelectedColumnsTable.save`, this neither
+        writes to Excel nor saves until :meth:`ExcelWorkbook.apply` runs.
+        """
+
+        self._ops.append(
+            _SelectedColumnsTableOp(
+                sheet=table.sheet,
+                start_row=table.start_row,
+                start_column=table.start_column,
+                end_row=table.end_row,
+                end_column=table.end_column,
+                header_row=table.header_row,
+                added_rows=table.added_rows,
+                columns=tuple(
+                    (column.source_column, column.header, tuple(column.values))
+                    for column in table.columns
                 ),
             )
         )
