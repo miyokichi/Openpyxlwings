@@ -31,7 +31,7 @@ class BorderTable:
     sheet: str | None
     start_row: int
     start_column: int
-    values: Table
+    columns: Table
     header_rows: int = 1
     header_columns: int = 0
     _original_rows: int = field(init=False, repr=False)
@@ -40,16 +40,16 @@ class BorderTable:
 
     def __post_init__(self) -> None:
         self._validate_shape()
-        self._original_rows = len(self.values)
+        self._original_rows = self.row_count
         self._original_columns = self.column_count
 
     @property
     def row_count(self) -> int:
-        return len(self.values)
+        return len(self.columns[0]) if self.columns else 0
 
     @property
     def column_count(self) -> int:
-        return len(self.values[0]) if self.values else 0
+        return len(self.columns)
 
     @property
     def end_row(self) -> int:
@@ -65,23 +65,32 @@ class BorderTable:
 
     @property
     def data(self) -> Table:
-        return [row[self.header_columns :] for row in self.values[self.header_rows :]]
+        return [
+            [column[row] for column in self.columns[self.header_columns :]]
+            for row in range(self.header_rows, self.row_count)
+        ]
 
     @property
     def row_headers(self) -> Table:
         if self.header_columns == 0:
             return []
-        return [row[: self.header_columns] for row in self.values[self.header_rows :]]
+        return [
+            [column[row] for column in self.columns[: self.header_columns]]
+            for row in range(self.header_rows, self.row_count)
+        ]
 
     @property
     def column_headers(self) -> Table:
-        return [row[self.header_columns :] for row in self.values[: self.header_rows]]
+        return [
+            [column[row] for column in self.columns[self.header_columns :]]
+            for row in range(self.header_rows)
+        ]
 
     def set_value(self, row: int, column: int, value: CellValue) -> None:
         """Set a value in the full table using 1-based table coordinates."""
 
         self._validate_table_position(row, column)
-        self.values[row - 1][column - 1] = value
+        self.columns[column - 1][row - 1] = value
 
     def set_body_value(self, row: int, column: int, value: CellValue) -> None:
         """Set a value in the body area using 1-based body coordinates."""
@@ -89,7 +98,7 @@ class BorderTable:
         body_rows = self.row_count - self.header_rows
         body_columns = self.column_count - self.header_columns
         _validate_position(row, column, max_row=body_rows, max_column=body_columns)
-        self.values[self.header_rows + row - 1][self.header_columns + column - 1] = value
+        self.columns[self.header_columns + column - 1][self.header_rows + row - 1] = value
 
     def find_body_row(self, row_header: CellValue | list[CellValue] | tuple[CellValue, ...]) -> int:
         """Find a body row by row header and return its 1-based body row index."""
@@ -118,7 +127,9 @@ class BorderTable:
             raise BorderTableShapeError("row values length does not match table body width.")
 
         row = self.find_body_row(row_header)
-        self.values[self.header_rows + row - 1][self.header_columns :] = list(values)
+        table_row_index = self.header_rows + row - 1
+        for column, value in zip(self.columns[self.header_columns :], values, strict=True):
+            column[table_row_index] = value
 
     def add_row(
         self,
@@ -141,9 +152,11 @@ class BorderTable:
         if len(headers) != self.header_columns:
             raise BorderTableShapeError("row_headers length does not match header_columns.")
 
-        table_index = self.header_rows + insert_body_index - 1
-        self.values.insert(table_index, headers + list(values))
-        self._insertions.append(_Insertion("row", self.start_row + table_index))
+        table_row_index = self.header_rows + insert_body_index - 1
+        full_row = headers + list(values)
+        for column, value in zip(self.columns, full_row, strict=True):
+            column.insert(table_row_index, value)
+        self._insertions.append(_Insertion("row", self.start_row + table_row_index))
 
     def add_column(
         self,
@@ -167,9 +180,8 @@ class BorderTable:
             raise BorderTableShapeError("column_headers length does not match header_rows.")
 
         table_column_index = self.header_columns + insert_body_index - 1
-        for row_index, row in enumerate(self.values):
-            value = headers[row_index] if row_index < self.header_rows else values[row_index - self.header_rows]
-            row.insert(table_column_index, value)
+        new_column = headers + list(values)
+        self.columns.insert(table_column_index, new_column)
         self._insertions.append(_Insertion("column", self.start_column + table_column_index))
 
     def add_header_row(
@@ -186,10 +198,11 @@ class BorderTable:
         if len(values) != self.column_count:
             raise BorderTableShapeError("header row values length does not match table width.")
 
-        table_index = insert_index - 1
-        self.values.insert(table_index, list(values))
+        table_row_index = insert_index - 1
+        for column, value in zip(self.columns, values, strict=True):
+            column.insert(table_row_index, value)
         self.header_rows += 1
-        self._insertions.append(_Insertion("row", self.start_row + table_index))
+        self._insertions.append(_Insertion("row", self.start_row + table_row_index))
 
     def add_header_column(
         self,
@@ -206,8 +219,7 @@ class BorderTable:
             raise BorderTableShapeError("header column values length does not match table height.")
 
         table_column_index = insert_index - 1
-        for row, value in zip(self.values, values, strict=True):
-            row.insert(table_column_index, value)
+        self.columns.insert(table_column_index, list(values))
         self.header_columns += 1
         self._insertions.append(_Insertion("column", self.start_column + table_column_index))
 
@@ -220,18 +232,18 @@ class BorderTable:
         self._insertions.clear()
 
     def _validate_shape(self) -> None:
-        if not self.values:
+        if not self.columns:
             raise BorderTableShapeError("table values cannot be empty.")
-        width = len(self.values[0])
-        if width == 0:
+        height = len(self.columns[0])
+        if height == 0:
             raise BorderTableShapeError("table width cannot be zero.")
-        if any(len(row) != width for row in self.values):
+        if any(len(column) != height for column in self.columns):
             raise BorderTableShapeError("table values must be rectangular.")
         if self.header_rows < 0 or self.header_columns < 0:
             raise BorderTableShapeError("header counts cannot be negative.")
-        if self.header_rows >= len(self.values):
+        if self.header_rows >= height:
             raise BorderTableShapeError("header_rows must leave at least one body row.")
-        if self.header_columns >= width:
+        if self.header_columns >= len(self.columns):
             raise BorderTableShapeError("header_columns must leave at least one body column.")
 
     def _validate_table_position(self, row: int, column: int) -> None:
@@ -296,9 +308,9 @@ def detect_bordered_table(
         end_column,
         inner=require_inner_borders,
     )
-    values = [
-        [cell.value for cell in row_cells]
-        for row_cells in worksheet.iter_rows(
+    columns = [
+        [cell.value for cell in column_cells]
+        for column_cells in worksheet.iter_cols(
             min_row=start_row,
             max_row=end_row,
             min_col=start_column,
@@ -310,7 +322,7 @@ def detect_bordered_table(
         sheet=sheet,
         start_row=start_row,
         start_column=start_column,
-        values=values,
+        columns=columns,
         header_rows=header_rows,
         header_columns=header_columns,
     )
@@ -362,7 +374,7 @@ def detect_bordered_table_by_header(
             if table_header_row_index != header_row:
                 continue
 
-            relative_header_row = table.values[header_row - 1]
+            relative_header_row = [column[header_row - 1] for column in table.columns]
             first_value_column = _find_first_value_header_column(
                 relative_header_row,
                 value_header_contains,

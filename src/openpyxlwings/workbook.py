@@ -620,7 +620,7 @@ class _XlwingsWriteSession:
             table.sheet,
             table.start_row,
             table.start_column,
-            table.values,
+            _rows_from_columns(table.columns),
             table.end_row,
             table.end_column,
             [(insertion.axis, insertion.index) for insertion in table._insertions],
@@ -852,6 +852,14 @@ def write_range_at(
     """Alias for :func:`write_values_at`."""
 
     write_values_at(path, sheet, row, column, values, visible=visible)
+
+
+def _rows_from_columns(columns: Table) -> Table:
+    """Transpose column-major storage into row-major values for xlwings."""
+
+    if not columns:
+        return []
+    return [list(row) for row in zip(*columns, strict=True)]
 
 
 def _trim_empty_edges(rows: Sequence[Sequence[Any]]) -> Table:

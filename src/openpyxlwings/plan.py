@@ -19,6 +19,7 @@ from openpyxlwings.workbook import (
     Table,
     _cell_address,
     _range_address,
+    _rows_from_columns,
 )
 
 if TYPE_CHECKING:
@@ -173,7 +174,7 @@ class WritePlan:
                 sheet=table.sheet,
                 start_row=table.start_row,
                 start_column=table.start_column,
-                values=[list(row) for row in table.values],
+                values=_rows_from_columns(table.columns),
                 end_row=table.end_row,
                 end_column=table.end_column,
                 insertions=tuple(

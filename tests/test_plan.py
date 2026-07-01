@@ -181,7 +181,7 @@ def make_bordered_table() -> BorderTable:
         sheet="Report",
         start_row=2,
         start_column=1,
-        values=[["h", "amount"], ["row1", 100]],
+        columns=[["h", "row1"], ["amount", 100]],
         header_rows=1,
         header_columns=1,
     )

@@ -67,11 +67,10 @@ def test_get_bordered_table_detects_range_and_headers(tmp_path: Path) -> None:
         )
 
     assert table.range == "B2:D5"
-    assert table.values == [
-        [None, "2026", "2027"],
-        ["Region", "Sales", "Sales"],
-        ["East", 10, 20],
-        ["West", 30, 40],
+    assert table.columns == [
+        [None, "Region", "East", "West"],
+        ["2026", "Sales", 10, 30],
+        ["2027", "Sales", 20, 40],
     ]
     assert table.column_headers == [["2026", "2027"], ["Sales", "Sales"]]
     assert table.row_headers == [["East"], ["West"]]
@@ -131,13 +130,12 @@ def test_border_table_edit_methods_update_values(tmp_path: Path) -> None:
 
     assert table.header_rows == 3
     assert table.header_columns == 2
-    assert table.values == [
-        [None, "Group", "FY2026", "2027", "2028"],
-        ["Region", "Metric", "Sales", "Sales", "Sales"],
-        ["Area", "Metric", "Actual", "Actual", "Plan"],
-        ["East", "A", 10, 20, 70],
-        ["West", "B", 30, 99, 80],
-        ["North", "C", 50, 60, 90],
+    assert table.columns == [
+        [None, "Region", "Area", "East", "West", "North"],
+        ["Group", "Metric", "Metric", "A", "B", "C"],
+        ["FY2026", "Sales", "Actual", 10, 30, 50],
+        ["2027", "Sales", "Actual", 20, 99, 60],
+        ["2028", "Sales", "Plan", 70, 80, 90],
     ]
 
 
@@ -161,11 +159,11 @@ def test_border_table_sets_body_row_by_multi_column_row_header() -> None:
         sheet="Report",
         start_row=1,
         start_column=1,
-        values=[
-            ["Region", "Segment", "Sales", "Cost"],
-            ["East", "Retail", 10, 3],
-            ["East", "Enterprise", 20, 8],
-            ["West", "Retail", 30, 9],
+        columns=[
+            ["Region", "East", "East", "West"],
+            ["Segment", "Retail", "Enterprise", "Retail"],
+            ["Sales", 10, 20, 30],
+            ["Cost", 3, 8, 9],
         ],
         header_rows=1,
         header_columns=2,
@@ -201,10 +199,9 @@ def test_border_table_rejects_bad_row_header_updates() -> None:
         sheet="Report",
         start_row=1,
         start_column=1,
-        values=[
-            ["Region", "Sales"],
-            ["East", 10],
-            ["East", 20],
+        columns=[
+            ["Region", "East", "East"],
+            ["Sales", 10, 20],
         ],
         header_rows=1,
         header_columns=1,
@@ -290,10 +287,10 @@ def test_require_inner_borders_false_reads_table_with_missing_inner_border(
         )
 
     assert table.range == "B2:D4"
-    assert table.values == [
-        ["Region", "Q1", "Q2"],
-        ["East", 10, 20],
-        ["West", 30, 40],
+    assert table.columns == [
+        ["Region", "East", "West"],
+        ["Q1", 10, 30],
+        ["Q2", 20, 40],
     ]
 
 
@@ -340,7 +337,7 @@ def test_require_inner_borders_false_reads_with_borderless_inner_cell(
         )
 
     assert table.range == "B2:D4"
-    assert table.values[1][1] == 10
+    assert table.columns[1][1] == 10
 
 
 def test_border_table_save_delegates_to_workbook() -> None:
@@ -357,7 +354,7 @@ def test_border_table_save_delegates_to_workbook() -> None:
         sheet="Report",
         start_row=1,
         start_column=1,
-        values=[["Name", "Score"], ["Alice", 10]],
+        columns=[["Name", "Alice"], ["Score", 10]],
     )
     table.add_row(["Bob", 20])
 
