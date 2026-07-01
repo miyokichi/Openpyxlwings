@@ -141,6 +141,43 @@ def test_border_table_edit_methods_update_values(tmp_path: Path) -> None:
     ]
 
 
+def test_border_table_sets_body_row_by_single_row_header(tmp_path: Path) -> None:
+    path = tmp_path / "book.xlsx"
+    make_bordered_workbook(path)
+
+    with ExcelWorkbook(path) as workbook:
+        table = workbook.get_bordered_table("Report", 4, 4, header_rows=2, header_columns=1)
+
+    assert table.find_body_row("West") == 2
+
+    table.set_body_row_by_header("East", [11, 22])
+
+    assert table.data == [[11, 22], [30, 40]]
+
+
+def test_border_table_sets_body_row_by_multi_column_row_header() -> None:
+    table = BorderTable(
+        workbook=None,  # type: ignore[arg-type]
+        sheet="Report",
+        start_row=1,
+        start_column=1,
+        values=[
+            ["Region", "Segment", "Sales", "Cost"],
+            ["East", "Retail", 10, 3],
+            ["East", "Enterprise", 20, 8],
+            ["West", "Retail", 30, 9],
+        ],
+        header_rows=1,
+        header_columns=2,
+    )
+
+    assert table.find_body_row(["East", "Enterprise"]) == 2
+
+    table.set_body_row_by_header(("East", "Enterprise"), [25, 10])
+
+    assert table.data == [[10, 3], [25, 10], [30, 9]]
+
+
 def test_border_table_rejects_bad_shapes(tmp_path: Path) -> None:
     path = tmp_path / "book.xlsx"
     make_bordered_workbook(path)
@@ -156,6 +193,34 @@ def test_border_table_rejects_bad_shapes(tmp_path: Path) -> None:
 
     with pytest.raises(BorderTableShapeError):
         table.add_column([1])
+
+
+def test_border_table_rejects_bad_row_header_updates() -> None:
+    table = BorderTable(
+        workbook=None,  # type: ignore[arg-type]
+        sheet="Report",
+        start_row=1,
+        start_column=1,
+        values=[
+            ["Region", "Sales"],
+            ["East", 10],
+            ["East", 20],
+        ],
+        header_rows=1,
+        header_columns=1,
+    )
+
+    with pytest.raises(BorderTableShapeError, match="matches multiple"):
+        table.find_body_row("East")
+
+    with pytest.raises(BorderTableShapeError, match="was not found"):
+        table.find_body_row("West")
+
+    with pytest.raises(BorderTableShapeError, match="row values length"):
+        table.set_body_row_by_header("East", [1, 2])
+
+    with pytest.raises(BorderTableShapeError, match="row_header length"):
+        table.set_body_row_by_header(["East", "Retail"], [1])
 
 
 def test_get_bordered_table_rejects_missing_internal_border(tmp_path: Path) -> None:

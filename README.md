@@ -11,6 +11,29 @@ openpyxlwings
 - 書き込み時は、既にユーザーが開いている Excel 画面を操作せず、ライブラリ専用の Excel インスタンスを作って処理します。
 - 画像、図形、グラフ、印刷設定、マクロなどを含むテンプレートファイルへの値流し込みを想定しています。
 
+目次
+----
+
+- [このライブラリが向いている場面](#このライブラリが向いている場面)
+- [仕組み](#仕組み)
+- [書き込み時の安全方針](#書き込み時の安全方針)
+- [インストール](#インストール)
+- [サンプルExcel](#サンプルexcel)
+- [注意点](#注意点)
+- [基本的な使い方](#基本的な使い方)
+- [読み取り](#読み取り)
+- [便利関数](#便利関数)
+- [書き込み](#書き込み)
+- [書き込み指示を貯めてから実行する（WritePlan）](#書き込み指示を貯めてから実行するwriteplan)
+- [帳票テンプレートに値を流し込む例](#帳票テンプレートに値を流し込む例)
+- [罫線で区切られた表を編集する](#罫線で区切られた表を編集する)
+- [Excelフォーマットから表を抽出する](#excelフォーマットから表を抽出する)
+- [API 一覧](#api-一覧)
+- [互換用の名前](#互換用の名前)
+- [CLI](#cli)
+- [開発メモ](#開発メモ)
+- [ライセンス](#ライセンス)
+
 このライブラリが向いている場面
 ------------------------------
 
@@ -428,6 +451,7 @@ plan = (
 | `plan.clear_contents(sheet, address)` | 指定範囲のクリアを予約する |
 | `plan.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号での範囲クリアを予約する |
 | `plan.add_bordered_table(table)` | 罫線テーブルの編集内容（スナップショット）を予約する |
+| `plan.add_selected_columns_table(table)` | 列指定の仮想テーブルの編集内容（スナップショット）を予約する |
 | `plan.clear()` | 予約した指示をすべて取り消す |
 | `len(plan)` | 予約済みの指示の数を返す |
 
@@ -609,6 +633,25 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 `set_body_value()` は見出しを除いた本文部分の位置で指定します。
 どちらも 1 始まりです。
 
+行見出しで本文行を探して、行全体を差し替えることもできます。
+
+```python
+from openpyxlwings import ExcelWorkbook
+
+with ExcelWorkbook("report.xlsx", visible=False) as book:
+    table = book.get_bordered_table("Report", row=5, column=3, header_rows=1, header_columns=1)
+
+    row = table.find_body_row("東日本")
+    print(row)
+
+    table.set_body_row_by_header("東日本", [1200, 980, 760])
+
+    table.save()
+```
+
+行見出し列が複数ある場合は、`("東日本", "法人")` のようにすべての行見出し値を指定します。
+同じ行見出しに複数行が一致する場合は、誤更新を避けるためエラーになります。
+
 ### 行や列を追加する
 
 ```python
@@ -675,6 +718,48 @@ with ExcelWorkbook("report.xlsx") as book:
 
 この例では、`header1` と `header2` が行見出し列、`amount` を含む列が値領域の列見出しになります。
 文字比較はデフォルトで大文字小文字を区別しません。
+
+### 列見出しの一部だけ指定して取得する（仮想テーブル）
+
+`get_bordered_table_by_header()` は表の列見出しを **すべて** 指定する必要がありますが、
+`get_bordered_table_by_columns()` は **必要な列だけ** を指定して、その列のデータだけを
+取得します。取得結果は **仮想テーブル**（`SelectedColumnsTable`）として扱え、行・列の
+追加ができます。Excelへ書き戻すときは取得した列・追加した行/列にだけ書き込み、
+取得していない既存列は変更しません。
+
+```text
+header1      header2       amount   amount
+header_col1  header2_col1  100      200
+header_col2  header2_col2  300      400
+header_col3  header2_col3  500      600
+```
+
+```python
+from openpyxlwings import ExcelWorkbook
+
+with ExcelWorkbook("report.xlsx") as book:
+    table = book.get_bordered_table_by_columns(
+        "Sheet1",
+        header_values=["header1"],          # 完全一致（リストで複数指定可・順序保持）
+        value_header_contains="amount",      # 部分一致（含む列をすべて取得・任意）
+    )
+
+    print(table.column_headers)   # ['header1', 'amount', 'amount']（header2 は含まれない）
+    print(table.data)             # [['header_col1', 100, 200], ...]
+
+    # 仮想テーブルとして編集できる
+    table.add_row(["header_col4", 700, 800])
+    table.add_column([1, 2, 3, 4], header="ratio")
+
+    table.save()  # 取得列＋追加分のみ書き戻し（末尾に行/列を挿入）
+```
+
+各列のデータは見出しの1つ下から **上から順に** 読み取り、セルに
+**値がある / 上罫線がある / 下罫線がある** いずれかなら継続、いずれもなければ終了します。
+列ごとに長さが異なる場合は `None` で埋めて矩形化します。
+
+`WritePlan` にも `plan.add_selected_columns_table(table)` で予約でき、
+`book.apply(plan)` のタイミングまで書き込みを遅延できます。
 
 Excelフォーマットから表を抽出する
 ----------------------------------
@@ -845,6 +930,7 @@ from openpyxlwings import ExcelWorkbook, WritePlan
 | `book.apply(plan, save=True)` | `WritePlan` に貯めた書き込みをまとめて実行する |
 | `book.get_bordered_table(sheet, row, column, header_rows=1, header_columns=0, require_inner_borders=True)` | 起点セルを含む罫線テーブルを取得する（`require_inner_borders=False` で内側の罫線欠けを許容） |
 | `book.get_bordered_table_by_header(sheet, header_values, value_header_contains=...)` | 見出し行の値と値列見出しの文字列から罫線テーブルを取得する |
+| `book.get_bordered_table_by_columns(sheet, header_values, value_header_contains=None)` | 列見出しの一部だけ指定して、その列のデータを仮想テーブルとして取得する |
 | `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
 | `book.extract(pattern, sheets=None, ranges=None)` | フォーマットに一致する表をすべて抽出する |
 | `book.save(path=None)` | 明示的に保存する |

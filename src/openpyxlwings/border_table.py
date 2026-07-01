@@ -91,6 +91,35 @@ class BorderTable:
         _validate_position(row, column, max_row=body_rows, max_column=body_columns)
         self.values[self.header_rows + row - 1][self.header_columns + column - 1] = value
 
+    def find_body_row(self, row_header: CellValue | list[CellValue] | tuple[CellValue, ...]) -> int:
+        """Find a body row by row header and return its 1-based body row index."""
+
+        expected = self._normalize_row_header(row_header)
+        matches = [
+            index
+            for index, actual in enumerate(self.row_headers, start=1)
+            if tuple(actual) == expected
+        ]
+        if not matches:
+            raise BorderTableShapeError("row_header was not found.")
+        if len(matches) > 1:
+            raise BorderTableShapeError("row_header matches multiple body rows.")
+        return matches[0]
+
+    def set_body_row_by_header(
+        self,
+        row_header: CellValue | list[CellValue] | tuple[CellValue, ...],
+        values: list[CellValue],
+    ) -> None:
+        """Replace one body row selected by row header."""
+
+        body_columns = self.column_count - self.header_columns
+        if len(values) != body_columns:
+            raise BorderTableShapeError("row values length does not match table body width.")
+
+        row = self.find_body_row(row_header)
+        self.values[self.header_rows + row - 1][self.header_columns :] = list(values)
+
     def add_row(
         self,
         values: list[CellValue],
@@ -207,6 +236,22 @@ class BorderTable:
 
     def _validate_table_position(self, row: int, column: int) -> None:
         _validate_position(row, column, max_row=self.row_count, max_column=self.column_count)
+
+    def _normalize_row_header(
+        self,
+        row_header: CellValue | list[CellValue] | tuple[CellValue, ...],
+    ) -> tuple[CellValue, ...]:
+        if self.header_columns == 0:
+            raise BorderTableShapeError("table has no row headers.")
+
+        headers = (
+            tuple(row_header)
+            if isinstance(row_header, (list, tuple))
+            else (row_header,)
+        )
+        if len(headers) != self.header_columns:
+            raise BorderTableShapeError("row_header length does not match header_columns.")
+        return headers
 
 
 def detect_bordered_table(
