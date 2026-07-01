@@ -146,6 +146,98 @@ def test_add_row_and_add_column_update_virtual_table(tmp_path: Path) -> None:
     assert table.data[0] == ["col1a", 100, 200, 1]
 
 
+def test_find_body_row_and_set_body_row_by_header(tmp_path: Path) -> None:
+    path = tmp_path / "book.xlsx"
+    make_amount_workbook(path)
+
+    with ExcelWorkbook(path) as workbook:
+        table = workbook.get_bordered_table_by_columns(
+            "Amount",
+            ["header1"],
+            value_header_contains="amount",
+        )
+
+    assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
+    assert table.find_body_row("col2a") == 2
+
+    table.set_body_row_by_header("col1a", [111, 222])
+
+    assert table.data == [
+        ["col1a", 111, 222],
+        ["col2a", 300, 400],
+        ["col3a", 500, 600],
+    ]
+
+
+def test_find_body_row_with_multi_column_row_header() -> None:
+    table = SelectedColumnsTable(
+        workbook=None,  # type: ignore[arg-type]
+        sheet="S",
+        start_row=1,
+        start_column=1,
+        end_row=4,
+        end_column=4,
+        header_row=1,
+        columns=[
+            _SelectedColumn("header1", 1, ["col1a", "col2a", "col3a"]),
+            _SelectedColumn("header2", 2, ["col1b", "col2b", "col3b"]),
+            _SelectedColumn("amount", 3, [100, 300, 500]),
+        ],
+        header_columns=2,
+    )
+
+    assert table.find_body_row(["col2a", "col2b"]) == 2
+
+    table.set_body_row_by_header(("col1a", "col1b"), [999])
+
+    assert table.data == [
+        ["col1a", "col1b", 999],
+        ["col2a", "col2b", 300],
+        ["col3a", "col3b", 500],
+    ]
+
+
+def test_row_header_lookup_rejects_bad_row_header(tmp_path: Path) -> None:
+    path = tmp_path / "book.xlsx"
+    make_amount_workbook(path)
+
+    with ExcelWorkbook(path) as workbook:
+        table = workbook.get_bordered_table_by_columns(
+            "Amount",
+            ["header1"],
+            value_header_contains="amount",
+        )
+
+    with pytest.raises(BorderTableShapeError, match="was not found"):
+        table.find_body_row("nope")
+
+    with pytest.raises(BorderTableShapeError, match="row_header length"):
+        table.find_body_row(["col1a", "extra"])
+
+    with pytest.raises(BorderTableShapeError, match="row values length"):
+        table.set_body_row_by_header("col1a", [1])
+
+
+def test_row_headers_empty_without_header_columns() -> None:
+    table = SelectedColumnsTable(
+        workbook=None,  # type: ignore[arg-type]
+        sheet="S",
+        start_row=2,
+        start_column=2,
+        end_row=4,
+        end_column=3,
+        header_row=2,
+        columns=[
+            _SelectedColumn("key", 2, ["a", "b", "c"]),
+            _SelectedColumn("amount", 3, [100, 200, 300]),
+        ],
+    )
+
+    assert table.row_headers == []
+    with pytest.raises(BorderTableShapeError, match="no row headers"):
+        table.find_body_row("a")
+
+
 def test_add_row_rejects_wrong_width(tmp_path: Path) -> None:
     path = tmp_path / "book.xlsx"
     make_amount_workbook(path)

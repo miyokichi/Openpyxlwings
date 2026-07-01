@@ -761,6 +761,35 @@ with ExcelWorkbook("report.xlsx") as book:
 `WritePlan` にも `plan.add_selected_columns_table(table)` で予約でき、
 `book.apply(plan)` のタイミングまで書き込みを遅延できます。
 
+### 仮想テーブルでも行見出しで本文行を探す
+
+罫線テーブルの `find_body_row()` / `set_body_row_by_header()` と同じ操作が、
+`SelectedColumnsTable`（仮想テーブル）でも使えます。行見出しとして扱われるのは
+`header_values` で指定した列（完全一致で選んだ列）で、`value_header_contains`
+で選んだ列は本文（値）列として扱われます。
+
+```python
+from openpyxlwings import ExcelWorkbook
+
+with ExcelWorkbook("report.xlsx", visible=False) as book:
+    table = book.get_bordered_table_by_columns(
+        "Sheet1",
+        header_values=["header1"],
+        value_header_contains="amount",
+    )
+
+    row = table.find_body_row("header_col1")
+    print(row)
+
+    table.set_body_row_by_header("header_col1", [1200, 980])
+
+    table.save()
+```
+
+`header_values` を複数指定した場合は、`("header_col1", "header2_col1")` のように
+すべての行見出し値を指定します。同じ行見出しに複数行が一致する場合は、誤更新を
+避けるためエラーになります。
+
 Excelフォーマットから表を抽出する
 ----------------------------------
 

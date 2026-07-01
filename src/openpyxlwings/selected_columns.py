@@ -55,6 +55,7 @@ class SelectedColumnsTable:
     end_column: int
     header_row: int
     columns: list[_SelectedColumn]
+    header_columns: int = 0
     _original_rows: int = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -85,6 +86,52 @@ class SelectedColumnsTable:
             [column.values[row] for column in self.columns]
             for row in range(self.row_count)
         ]
+
+    @property
+    def row_headers(self) -> list[list[CellValue]]:
+        """Values of the leading ``header_columns`` columns, one list per row.
+
+        These are the columns selected via ``header_values`` (exact match), in
+        the order given; columns selected via ``value_header_contains`` are
+        never row headers.
+        """
+
+        if self.header_columns == 0:
+            return []
+        return [
+            [column.values[row] for column in self.columns[: self.header_columns]]
+            for row in range(self.row_count)
+        ]
+
+    def find_body_row(self, row_header: CellValue | list[CellValue] | tuple[CellValue, ...]) -> int:
+        """Find a body row by row header and return its 1-based row index."""
+
+        expected = self._normalize_row_header(row_header)
+        matches = [
+            index
+            for index, actual in enumerate(self.row_headers, start=1)
+            if tuple(actual) == expected
+        ]
+        if not matches:
+            raise BorderTableShapeError("row_header was not found.")
+        if len(matches) > 1:
+            raise BorderTableShapeError("row_header matches multiple body rows.")
+        return matches[0]
+
+    def set_body_row_by_header(
+        self,
+        row_header: CellValue | list[CellValue] | tuple[CellValue, ...],
+        values: list[CellValue],
+    ) -> None:
+        """Replace one row's non-header column values, selected by row header."""
+
+        body_columns = self.column_count - self.header_columns
+        if len(values) != body_columns:
+            raise BorderTableShapeError("row values length does not match table body width.")
+
+        row = self.find_body_row(row_header)
+        for column, value in zip(self.columns[self.header_columns :], values, strict=True):
+            column.values[row - 1] = value
 
     def set_value(self, row: int, column: int, value: CellValue) -> None:
         """Set a body value using 1-based virtual coordinates."""
@@ -149,6 +196,22 @@ class SelectedColumnsTable:
         for column in self.columns:
             if len(column.values) < height:
                 column.values.extend([None] * (height - len(column.values)))
+
+    def _normalize_row_header(
+        self,
+        row_header: CellValue | list[CellValue] | tuple[CellValue, ...],
+    ) -> tuple[CellValue, ...]:
+        if self.header_columns == 0:
+            raise BorderTableShapeError("table has no row headers.")
+
+        headers = (
+            tuple(row_header)
+            if isinstance(row_header, (list, tuple))
+            else (row_header,)
+        )
+        if len(headers) != self.header_columns:
+            raise BorderTableShapeError("row_header length does not match header_columns.")
+        return headers
 
 
 def detect_selected_columns_table(
@@ -226,6 +289,7 @@ def detect_selected_columns_table(
             end_column=table.end_column,
             header_row=row,
             columns=columns,
+            header_columns=len(header_values),
         )
 
     raise BorderTableNotFoundError(
