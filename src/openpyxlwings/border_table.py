@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -348,17 +349,60 @@ def detect_bordered_table_by_header(
         raise BorderTableShapeError("value_header_contains cannot be empty.")
 
     header_width = len(header_values)
-    for row in range(1, worksheet.max_row + 1):
-        for column in range(1, worksheet.max_column - header_width + 2):
-            if not _header_values_match(
-                worksheet,
-                row,
-                column,
-                header_values,
-                match_case=match_case,
-            ):
-                continue
+    anchors = _iter_sequence_anchor_cells(worksheet, header_values, match_case=match_case)
+    for row, _column, table in _iter_candidate_tables(
+        workbook,
+        worksheet,
+        sheet,
+        anchors,
+        header_row=header_row,
+        header_columns=header_width,
+        require_inner_borders=require_inner_borders,
+    ):
+        relative_header_row = [column[header_row - 1] for column in table.columns]
+        first_value_column = _find_first_value_header_column(
+            relative_header_row,
+            value_header_contains,
+            match_case=match_case,
+        )
+        if first_value_column is None:
+            continue
+        if first_value_column <= header_width:
+            raise BorderTableShapeError(
+                "value-header columns must be to the right of header_values."
+            )
+        if first_value_column != header_width + 1:
+            raise BorderTableShapeError(
+                "header_values must cover every row-header column before the value area."
+            )
 
+        table.header_rows = header_row
+        table.header_columns = first_value_column - 1
+        table._validate_shape()
+        return table
+
+    raise BorderTableNotFoundError("A bordered table matching the header values was not found.")
+
+
+def _iter_candidate_tables(
+    workbook: ExcelWorkbook,
+    worksheet: Worksheet,
+    sheet: str | None,
+    anchors: Iterator[tuple[int, int]],
+    *,
+    header_row: int,
+    header_columns: int,
+    require_inner_borders: bool,
+):
+    """Yield ``(row, column, table)`` for anchors that sit on a table's header row.
+
+    Anchors that do not belong to a detectable bordered table, or whose row is
+    not the ``header_row``-th row of the detected table, are skipped so the
+    search can continue with the next candidate.
+    """
+
+    for row, column in anchors:
+        try:
             table = detect_bordered_table(
                 workbook,
                 worksheet,
@@ -366,36 +410,45 @@ def detect_bordered_table_by_header(
                 row,
                 column,
                 header_rows=header_row,
-                header_columns=header_width,
+                header_columns=header_columns,
                 require_inner_borders=require_inner_borders,
             )
-            table_header_row_index = row - table.start_row + 1
-            if table_header_row_index != header_row:
-                continue
+        except (BorderTableNotFoundError, BorderTableShapeError):
+            continue
+        if row - table.start_row + 1 != header_row:
+            continue
+        yield row, column, table
 
-            relative_header_row = [column[header_row - 1] for column in table.columns]
-            first_value_column = _find_first_value_header_column(
-                relative_header_row,
-                value_header_contains,
-                match_case=match_case,
-            )
-            if first_value_column is None:
-                continue
-            if first_value_column <= header_width:
-                raise BorderTableShapeError(
-                    "value-header columns must be to the right of header_values."
-                )
-            if first_value_column != header_width + 1:
-                raise BorderTableShapeError(
-                    "header_values must cover every row-header column before the value area."
-                )
 
-            table.header_rows = header_row
-            table.header_columns = first_value_column - 1
-            table._validate_shape()
-            return table
+def _iter_sequence_anchor_cells(
+    worksheet: Worksheet,
+    header_values: list[CellValue],
+    *,
+    match_case: bool,
+) -> Iterator[tuple[int, int]]:
+    """Yield every cell where ``header_values`` appear consecutively to the right."""
 
-    raise BorderTableNotFoundError("A bordered table matching the header values was not found.")
+    width = len(header_values)
+    for row in range(1, worksheet.max_row + 1):
+        for column in range(1, worksheet.max_column - width + 2):
+            if _header_values_match(worksheet, row, column, header_values, match_case=match_case):
+                yield row, column
+
+
+def _iter_value_anchor_cells(
+    worksheet: Worksheet,
+    expected: CellValue,
+    *,
+    match_case: bool,
+) -> Iterator[tuple[int, int]]:
+    """Yield every cell whose value matches ``expected`` exactly."""
+
+    target = _normalize_value(expected, match_case=match_case)
+    for row in range(1, worksheet.max_row + 1):
+        for column in range(1, worksheet.max_column + 1):
+            actual = worksheet.cell(row=row, column=column).value
+            if _normalize_value(actual, match_case=match_case) == target:
+                yield row, column
 
 
 def _walk_inner_bounds(

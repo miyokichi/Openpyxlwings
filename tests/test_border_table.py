@@ -100,6 +100,40 @@ def test_get_bordered_table_by_header_detects_variable_amount_columns(tmp_path: 
     assert table.data == [[100, 300, 500], [200, 400, 600]]
 
 
+def test_get_bordered_table_by_header_skips_decoy_header_text(tmp_path: Path) -> None:
+    # The same header sequence appears as plain borderless text above the real
+    # table; the decoy must be skipped instead of aborting the search.
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Amount"
+    sheet.cell(row=1, column=2).value = "header1"
+    sheet.cell(row=1, column=3).value = "header2"
+
+    values = [
+        ["header1", "header2", "amount"],
+        ["header_col1", "header2_col1", 100],
+        ["header_col2", "header2_col2", 300],
+    ]
+    thin = Side(style="thin")
+    border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    for row_offset, row in enumerate(values, start=3):
+        for column_offset, value in enumerate(row, start=2):
+            cell = sheet.cell(row=row_offset, column=column_offset)
+            cell.value = value
+            cell.border = border
+    path = tmp_path / "decoy.xlsx"
+    workbook.save(path)
+
+    with ExcelWorkbook(path) as book:
+        table = book.get_bordered_table_by_header(
+            "Amount",
+            ["header1", "header2"],
+            value_header_contains="amount",
+        )
+
+    assert table.range == "B3:D5"
+
+
 def test_get_bordered_table_by_header_is_case_insensitive(tmp_path: Path) -> None:
     path = tmp_path / "amount.xlsx"
     make_amount_header_workbook(path)

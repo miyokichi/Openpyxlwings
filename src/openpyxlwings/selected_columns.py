@@ -18,8 +18,9 @@ from openpyxl.worksheet.worksheet import Worksheet
 from openpyxlwings.border_table import (
     _has_bottom_border,
     _has_top_border,
+    _iter_candidate_tables,
+    _iter_value_anchor_cells,
     _normalize_value,
-    detect_bordered_table,
 )
 from openpyxlwings.exceptions import (
     BorderTableNotFoundError,
@@ -236,35 +237,16 @@ def detect_selected_columns_table(
     if header_row < 1:
         raise BorderTableShapeError("header_row must be 1 or greater.")
 
-    for row in range(1, worksheet.max_row + 1):
-        anchor_column = _find_header_column(
-            worksheet,
-            row,
-            1,
-            worksheet.max_column,
-            header_values[0],
-            match_case=match_case,
-        )
-        if anchor_column is None:
-            continue
-
-        try:
-            table = detect_bordered_table(
-                workbook,
-                worksheet,
-                sheet,
-                row,
-                anchor_column,
-                header_rows=header_row,
-                header_columns=0,
-                require_inner_borders=require_inner_borders,
-            )
-        except (BorderTableNotFoundError, BorderTableShapeError):
-            continue
-
-        if row - table.start_row + 1 != header_row:
-            continue
-
+    anchors = _iter_value_anchor_cells(worksheet, header_values[0], match_case=match_case)
+    for row, _anchor_column, table in _iter_candidate_tables(
+        workbook,
+        worksheet,
+        sheet,
+        anchors,
+        header_row=header_row,
+        header_columns=0,
+        require_inner_borders=require_inner_borders,
+    ):
         columns = _select_columns(
             worksheet,
             row,

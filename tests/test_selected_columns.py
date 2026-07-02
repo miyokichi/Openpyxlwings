@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Border, Side
 
 from openpyxlwings import ExcelWorkbook, SelectedColumnsTable, WritePlan
@@ -113,6 +113,23 @@ def test_ragged_columns_are_padded_with_none() -> None:
 
     assert table.row_count == 3
     assert table.data == [["a", "b", "c"], [100, None, None]]
+
+
+def test_decoy_first_header_on_same_row_is_skipped(tmp_path: Path) -> None:
+    # A borderless cell with the same text sits in the same row, left of the
+    # real table's header; the search must move on to the next candidate cell
+    # instead of skipping the whole row.
+    path = tmp_path / "book.xlsx"
+    make_amount_workbook(path)
+    book = load_workbook(path)
+    book["Amount"].cell(row=2, column=1).value = "header1"
+    book.save(path)
+
+    with ExcelWorkbook(path) as workbook:
+        table = workbook.get_bordered_table_by_columns("Amount", ["header1"])
+
+    assert table.column_headers == ["header1"]
+    assert table.data == [["col1a", "col2a", "col3a"]]
 
 
 def test_missing_header_raises(tmp_path: Path) -> None:
