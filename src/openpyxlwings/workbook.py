@@ -13,9 +13,9 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from openpyxlwings.border_table import (
     BorderTable,
-    detect_bordered_table,
     detect_bordered_table_by_columns,
     detect_bordered_table_by_header,
+    detect_table_region,
 )
 from openpyxlwings.exceptions import (
     BorderTableShapeError,
@@ -246,23 +246,32 @@ class ExcelWorkbook:
         match_case: bool = False,
         require_inner_borders: bool = True,
     ) -> BorderTable:
-        """Detect a bordered table, located by cell position or by headers.
+        """Detect a table, located by its top-left cell or by headers.
 
         Exactly one way of locating the table must be given:
 
-        - ``row``/``column``: the table containing that cell is detected.
-          ``header_rows``/``header_columns`` describe its header area.
-        - ``header_values``: the table whose ``header_rows``-th row carries the
-          given values is searched for. With ``columns="all"`` (default) the
-          values must cover every row-header column from the left edge, and
-          ``value_header_contains`` (required) marks where the value columns
-          begin; the whole rectangle is returned. With ``columns="selected"``
-          only the matching columns (plus every column whose header contains
-          ``value_header_contains``, if given) are held as a partial table,
-          and writing back leaves unselected columns untouched.
+        - ``row``/``column``: the cell is taken as the table's top-left corner
+          and the region is grown right and down. A cell belongs to the region
+          when it has a value or any border, so values-only tables, borders-
+          only tables, and tables with missing borders are all readable. The
+          region ends at the first row/column without content (a lone closing
+          border line does not count as content). ``header_rows``/
+          ``header_columns`` describe the header area.
+        - ``header_values``: the bordered table whose ``header_rows``-th row
+          carries the given values is searched for. With ``columns="all"``
+          (default) the values must cover every row-header column from the
+          left edge, and ``value_header_contains`` (required) marks where the
+          value columns begin; the whole rectangle is returned. With
+          ``columns="selected"`` only the matching columns (plus every column
+          whose header contains ``value_header_contains``, if given) are held
+          as a partial table, and writing back leaves unselected columns
+          untouched.
 
-        Pass ``require_inner_borders=False`` to read tables whose inner
-        gridlines are partly missing; only the outer frame is required.
+        ``require_inner_borders`` applies to the ``header_values`` search,
+        which is border-based: pass ``False`` to accept tables whose inner
+        gridlines are partly missing (only the outer frame is required). The
+        top-left-cell search does not use borders as a requirement, so the
+        flag has no effect there.
         """
 
         if columns not in ("all", "selected"):
@@ -288,7 +297,7 @@ class ExcelWorkbook:
                 raise BorderTableShapeError(
                     'columns="selected" requires header_values.'
                 )
-            return detect_bordered_table(
+            return detect_table_region(
                 self,
                 worksheet,
                 sheet,
@@ -296,7 +305,6 @@ class ExcelWorkbook:
                 column,
                 header_rows=header_rows,
                 header_columns=header_columns,
-                require_inner_borders=require_inner_borders,
             )
 
         if header_columns:

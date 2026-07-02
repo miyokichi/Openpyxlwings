@@ -5,7 +5,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Border, Side
 
 from openpyxlwings import BorderTable, ExcelWorkbook
-from openpyxlwings.exceptions import BorderTableShapeError
+from openpyxlwings.exceptions import BorderTableNotFoundError, BorderTableShapeError
 
 
 def make_bordered_workbook(path: Path) -> None:
@@ -60,8 +60,8 @@ def test_get_bordered_table_detects_range_and_headers(tmp_path: Path) -> None:
     with ExcelWorkbook(path) as workbook:
         table = workbook.get_bordered_table(
             "Report",
-            row=3,
-            column=3,
+            row=2,
+            column=2,
             header_rows=2,
             header_columns=1,
         )
@@ -183,7 +183,7 @@ def test_border_table_edit_methods_update_values(tmp_path: Path) -> None:
     make_bordered_workbook(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table("Report", row=4, column=4, header_rows=2, header_columns=1)
+        table = workbook.get_bordered_table("Report", row=2, column=2, header_rows=2, header_columns=1)
 
     table.set_value(1, 2, "FY2026")
     table.set_body_value(2, 2, 99)
@@ -208,7 +208,7 @@ def test_border_table_sets_body_row_by_single_row_header(tmp_path: Path) -> None
     make_bordered_workbook(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table("Report", row=4, column=4, header_rows=2, header_columns=1)
+        table = workbook.get_bordered_table("Report", row=2, column=2, header_rows=2, header_columns=1)
 
     assert table.find_body_row("West") == 2
 
@@ -245,7 +245,7 @@ def test_border_table_rejects_bad_shapes(tmp_path: Path) -> None:
     make_bordered_workbook(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table("Report", row=4, column=4, header_rows=2, header_columns=1)
+        table = workbook.get_bordered_table("Report", row=2, column=2, header_rows=2, header_columns=1)
 
     with pytest.raises(BorderTableShapeError):
         table.set_body_value(10, 1, "outside")
@@ -302,8 +302,11 @@ def test_get_bordered_table_rejects_missing_internal_border(tmp_path: Path) -> N
     workbook.save(path)
 
     with ExcelWorkbook(path) as reader:
-        with pytest.raises(BorderTableShapeError):
-            reader.get_bordered_table("Broken", row=1, column=1)
+        table = reader.get_bordered_table("Broken", row=1, column=1)
+
+    # Borders alone mark the region even though every border is incomplete.
+    assert table.range == "A1:B2"
+    assert table.columns == [[None, None], [None, None]]
 
 
 def make_missing_inner_border_workbook(path: Path) -> None:
@@ -334,20 +337,17 @@ def make_missing_inner_border_workbook(path: Path) -> None:
     workbook.save(path)
 
 
-def test_require_inner_borders_false_reads_table_with_missing_inner_border(
-    tmp_path: Path,
-) -> None:
+def test_missing_inner_border_reads_by_default(tmp_path: Path) -> None:
     path = tmp_path / "book.xlsx"
     make_missing_inner_border_workbook(path)
 
     with ExcelWorkbook(path) as reader:
         table = reader.get_bordered_table(
             "Partial",
-            row=3,
-            column=3,
+            row=2,
+            column=2,
             header_rows=1,
             header_columns=1,
-            require_inner_borders=False,
         )
 
     assert table.range == "B2:D4"
@@ -358,16 +358,7 @@ def test_require_inner_borders_false_reads_table_with_missing_inner_border(
     ]
 
 
-def test_missing_inner_border_still_rejected_by_default(tmp_path: Path) -> None:
-    path = tmp_path / "book.xlsx"
-    make_missing_inner_border_workbook(path)
-
-    with ExcelWorkbook(path) as reader:
-        with pytest.raises(BorderTableShapeError):
-            reader.get_bordered_table("Partial", row=3, column=3, header_rows=1, header_columns=1)
-
-
-def test_require_inner_borders_false_reads_with_borderless_inner_cell(
+def test_borderless_inner_cell_reads_by_default(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "book.xlsx"
@@ -397,11 +388,90 @@ def test_require_inner_borders_false_reads_with_borderless_inner_cell(
             column=2,
             header_rows=1,
             header_columns=1,
-            require_inner_borders=False,
         )
 
     assert table.range == "B2:D4"
     assert table.columns[1][1] == 10
+
+
+def test_values_only_table_reads_without_any_borders(tmp_path: Path) -> None:
+    path = tmp_path / "book.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Plain"
+    values = [
+        ["Region", "Q1", "Q2"],
+        ["East", 10, 20],
+        ["West", 30, 40],
+    ]
+    for row_offset, row in enumerate(values, start=2):
+        for column_offset, value in enumerate(row, start=2):
+            sheet.cell(row=row_offset, column=column_offset).value = value
+    sheet.cell(row=7, column=2).value = "outside"  # separated by an empty row
+    workbook.save(path)
+
+    with ExcelWorkbook(path) as reader:
+        table = reader.get_bordered_table("Plain", row=2, column=2, header_columns=1)
+
+    assert table.range == "B2:D4"
+    assert table.data == [[10, 30], [20, 40]]
+
+
+def test_region_stops_at_closing_border_lines(tmp_path: Path) -> None:
+    # The table's bottom/right edges are drawn as the neighbours' top/left
+    # borders; those closing lines must not extend the region.
+    path = tmp_path / "book.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Closed"
+    top_left = Border(top=Side(style="thin"), left=Side(style="thin"))
+    for row in range(2, 4):
+        for column in range(2, 4):
+            cell = sheet.cell(row=row, column=column)
+            cell.value = (row - 2) * 2 + (column - 2)
+            cell.border = top_left
+    for column in range(2, 4):  # closing line under the table
+        sheet.cell(row=4, column=column).border = Border(top=Side(style="thin"))
+    for row in range(2, 4):  # closing line right of the table
+        sheet.cell(row=row, column=4).border = Border(left=Side(style="thin"))
+    workbook.save(path)
+
+    with ExcelWorkbook(path) as reader:
+        table = reader.get_bordered_table("Closed", row=2, column=2)
+
+    assert table.range == "B2:C3"
+
+
+def test_region_grows_to_bounding_box_of_l_shaped_content(tmp_path: Path) -> None:
+    # Content only reachable after growing down must still widen the region.
+    path = tmp_path / "book.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "LShape"
+    sheet.cell(row=2, column=2).value = "a"
+    sheet.cell(row=3, column=2).value = "b"
+    sheet.cell(row=4, column=2).value = "c"
+    sheet.cell(row=4, column=3).value = "d"
+    workbook.save(path)
+
+    with ExcelWorkbook(path) as reader:
+        table = reader.get_bordered_table("LShape", row=2, column=2)
+
+    assert table.range == "B2:C4"
+    assert table.columns == [["a", "b", "c"], [None, None, "d"]]
+
+
+def test_empty_start_cell_raises_not_found(tmp_path: Path) -> None:
+    path = tmp_path / "book.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Empty"
+    sheet.cell(row=10, column=10).value = "far away"
+    workbook.save(path)
+
+    with ExcelWorkbook(path) as reader:
+        with pytest.raises(BorderTableNotFoundError):
+            reader.get_bordered_table("Empty", row=2, column=2)
 
 
 def test_border_table_save_delegates_to_workbook() -> None:
@@ -449,8 +519,8 @@ def test_repeated_bordered_table_reads_reuse_single_file_open(
     monkeypatch.setattr(workbook_module, "load_workbook", counting_load_workbook)
 
     with ExcelWorkbook(path) as workbook:
-        first = workbook.get_bordered_table("Report", row=3, column=3, header_rows=2, header_columns=1)
-        second = workbook.get_bordered_table("Report", row=3, column=3, header_rows=2, header_columns=1)
+        first = workbook.get_bordered_table("Report", row=2, column=2, header_rows=2, header_columns=1)
+        second = workbook.get_bordered_table("Report", row=2, column=2, header_rows=2, header_columns=1)
 
     assert first.range == second.range == "B2:D5"
     assert styled_opens == 1

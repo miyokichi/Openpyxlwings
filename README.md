@@ -114,7 +114,7 @@ samples/openpyxlwings_sample.xlsx
 | --- | --- |
 | `QuickReadWrite` | 通常の読み取り・書き込みAPIを試すための表 |
 | `BorderedTable` | 罫線テーブル検出・編集を試すための表 |
-| `BrokenBorder` | 内部罫線が欠けている例外確認用の表 |
+| `BrokenBorder` | 内部罫線が欠けていても読み取れることの確認用の表 |
 
 サンプルファイルを再生成する場合:
 
@@ -130,8 +130,8 @@ from openpyxlwings import ExcelWorkbook
 with ExcelWorkbook("samples/openpyxlwings_sample.xlsx") as book:
     table = book.get_bordered_table(
         "BorderedTable",
-        row=5,
-        column=3,
+        row=4,      # 表の左上セル
+        column=2,
         header_rows=2,
         header_columns=1,
     )
@@ -562,8 +562,8 @@ with ExcelWorkbook(template_path, visible=False) as template:
 罫線で区切られた表を編集する
 ----------------------------
 
-Excel の「テーブル機能」ではなく、普通のセル範囲に罫線が引かれている表も扱えます。
-起点セルを指定すると、そのセルを含む罫線テーブルを検出します。
+Excel の「テーブル機能」ではなく、普通のセル範囲に作られた表も扱えます。
+**表の左上セル** を指定すると、そこから右・下方向に表の範囲を探索します。
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -571,7 +571,7 @@ from openpyxlwings import ExcelWorkbook
 with ExcelWorkbook("report.xlsx", visible=False) as book:
     table = book.get_bordered_table(
         "Report",
-        row=5,
+        row=5,      # 表の左上セル
         column=3,
         header_rows=1,
         header_columns=1,
@@ -592,45 +592,49 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
 | 引数 | 内容 |
 | --- | --- |
-| `row` / `column` | 起点セルの位置で探す（両方必須）。`header_values` とは併用不可 |
+| `row` / `column` | 表の左上セルの位置で探す（両方必須）。`header_values` とは併用不可 |
 | `header_values` | 見出し行の値で探す。`row`/`column` とは併用不可 |
 | `value_header_contains` | 値領域の列見出しに含まれる文字列（部分一致）。`columns="all"` では必須、`"selected"` では任意 |
 | `columns` | `"all"`（既定・表全体）か `"selected"`（指定列のみの部分テーブル） |
 | `header_rows` | 見出しの行数。見出し指定のときは「表の何行目が見出しか」の意味にもなる |
-| `header_columns` | 行見出しの列数（起点セル指定のときのみ。見出し指定では自動決定） |
+| `header_columns` | 行見出しの列数（左上セル指定のときのみ。見出し指定では自動決定） |
 | `match_case` | 見出し比較で大文字小文字を区別するか（既定は区別しない） |
-| `require_inner_borders` | 内側の格子線をすべて要求するか（既定は要求。`False` で外枠のみ） |
+| `require_inner_borders` | 見出し指定（`header_values`）のときのみ有効。内側の格子線をすべて要求するか（`False` で外枠のみ） |
 
 見出しで探す2つのモード（`columns="all"` / `"selected"`）の詳しい動きは後述します。
 
-### 内側の罫線が欠けている表を読む
+### 左上セル指定は罫線がなくても読める
 
-既定では、表の内側のすべての格子線がそろっていることを要求します。
-内側の罫線が一部欠けている表を読みたい場合は、`require_inner_borders=False` を指定します。
-このとき必要なのは**一番外側の枠線だけ**で、表の範囲は罫線でつながったセルの外接矩形から決定します。
+左上セル指定の探索は「セルに **値があるか、何かしらの罫線があるか**」だけを見ます。
+そのため、次のような表がすべて同じ書き方で読めます。
+
+- 罫線がまったくない、値だけの表
+- 値が入っていない、罫線だけの表（これから値を流し込むテンプレートの枠など）
+- 罫線が一部欠けている表・内側の格子線がない表
+- 結合セルを含む表（結合範囲は左上セルにだけ値が入ります）
 
 ```python
 from openpyxlwings import ExcelWorkbook
 
 with ExcelWorkbook("report.xlsx") as book:
-    table = book.get_bordered_table(
-        "Report",
-        row=5,
-        column=3,
-        header_rows=1,
-        header_columns=1,
-        require_inner_borders=False,
-    )
+    # 罫線が欠けていても、値だけでも、左上セルさえ指すだけで読める
+    table = book.get_bordered_table("Report", row=5, column=3, header_columns=1)
 
     print(table.range)
     print(table.data)
 ```
 
-内側の格子線は値の読み取りには使っていない（範囲内の全セルをそのまま読む）ため、外枠さえそろっていれば内側がどれだけ欠けていても読み取れます。
-`require_inner_borders` は見出しから表を探す場合（後述の `header_values` 指定）にも同じように使えます。
+範囲の探索は次のルールで止まります（終了条件）。
 
-この検出は「外枠の外側のセルには罫線がない（＝表は罫線のない余白で囲まれている）」ことを前提にしています。
-別の表とすき間なく隣接していたり、外側に飾り罫線があると、範囲を広く拾ってしまうことがあります。
+- 右方向: 現在の行範囲に「値も罫線もないセルしかない列」が現れたらそこで終了
+- 下方向: 現在の列範囲に「値も罫線もないセルしかない行」が現れたらそこで終了
+- ただし、**次の行が上罫線だけ**（＝表の下端の閉じ線が下のセル側に引かれているケース）や
+  **次の列が左罫線だけ**（＝右端の閉じ線）の場合は表の外とみなします
+- 右・下への拡張は互いに影響するため、どちらにも広がらなくなるまで繰り返します
+  （L字型にデータが伸びていても外接矩形まで広がります）
+
+つまり「値も罫線もない空の行・列で表が囲まれている」ことが唯一の前提です。
+表の中に完全に空の行（値も罫線もない行）があると、そこで表が終わったと判断されるので注意してください。
 
 ### 表の中身を変更する
 
@@ -824,7 +828,13 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
 ### 表の検出条件と、見つからないときのチェックリスト
 
-どの指定方法でも、表そのものは罫線から検出します。条件は次のとおりです。
+検出の厳しさは指定方法で異なります。
+
+**左上セル指定（`row`/`column`）** はゆるい検出です。
+条件は「値も罫線もない空の行・列で表が囲まれていること」だけで、
+罫線の欠け・罫線なし・値なし・結合セルをすべて許容します（終了条件は前述）。
+
+**見出し指定（`header_values`）** は罫線ベースの検出で、次の条件があります。
 
 - 外枠（上下左右）が完全にそろっていること
 - 既定では内側の格子線もすべてそろっていること（`require_inner_borders=False` で外枠のみに緩和）
@@ -832,7 +842,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 - 最低でも 2行×2列 あること
 - 表のすぐ外側のセルには罫線がないこと（隣接する別の表や飾り罫線があると範囲を広く拾います）
 
-`header_values` で探す場合は、さらに次の条件があります。
+さらに見出しの一致について次の条件があります。
 
 - 見出しの比較は「前後の空白を除去した文字列の完全一致」です。既定では大文字小文字を
   区別しませんが、**見出し内部の空白・全角半角・セル内改行の違いは不一致** になります
@@ -840,9 +850,10 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 - 一致した行が表の `header_rows` 行目（既定では1行目）である必要があります。
   枠内の見出しより上にタイトル行がある表は `header_rows=2` のように指定します
 
-見つからないときは、(1) 結合セルが混ざっていないか、(2) 内側の罫線が欠けていないか、
-(3) 見出しの文字列が完全一致しているか、(4) `header_rows` が実際の見出し位置と
-合っているか、の順に確認するのが早道です。
+見出し指定で見つからないときは、(1) 結合セルが混ざっていないか、(2) 内側の罫線が
+欠けていないか、(3) 見出しの文字列が完全一致しているか、(4) `header_rows` が実際の
+見出し位置と合っているか、の順に確認するのが早道です。
+表の位置がわかっているなら、左上セル指定に切り替えるのが確実です。
 
 `header_values` を複数指定した場合は、`("header_col1", "header2_col1")` のように
 すべての行見出し値を指定します。同じ行見出しに複数行が一致する場合は、誤更新を
@@ -1015,7 +1026,7 @@ from openpyxlwings import ExcelWorkbook, WritePlan
 | `book.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号で指定範囲の値や数式だけを消す |
 | `WritePlan()` | 書き込み指示を貯めるオブジェクトを作る |
 | `book.apply(plan, save=True)` | `WritePlan` に貯めた書き込みをまとめて実行する |
-| `book.get_bordered_table(sheet, *, row=None, column=None, header_values=None, value_header_contains=None, columns="all", header_rows=1, header_columns=0, match_case=False, require_inner_borders=True)` | 罫線テーブルを取得する。`row`/`column`（起点セル指定）か `header_values`（見出し指定）のどちらかで表を探し、`columns="selected"` で指定列のみの部分テーブルを返す |
+| `book.get_bordered_table(sheet, *, row=None, column=None, header_values=None, value_header_contains=None, columns="all", header_rows=1, header_columns=0, match_case=False, require_inner_borders=True)` | 表を取得する。`row`/`column`（左上セル指定・罫線不要のゆるい探索）か `header_values`（見出し指定・罫線ベース）のどちらかで表を探し、`columns="selected"` で指定列のみの部分テーブルを返す |
 | `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
 | `book.extract(pattern, sheets=None, ranges=None)` | フォーマットに一致する表をすべて抽出する |
 | `book.save(path=None)` | 明示的に保存する |
@@ -1042,7 +1053,7 @@ assert ExcelWriter is ExcelWorkbook
 
 | 旧 | 新 |
 | --- | --- |
-| `book.get_bordered_table(sheet, row, column, ...)` | `book.get_bordered_table(sheet, row=row, column=column, ...)`（キーワード引数に変更） |
+| `book.get_bordered_table(sheet, row, column, ...)` | `book.get_bordered_table(sheet, row=row, column=column, ...)`（キーワード引数に変更。**セルは表内の任意位置ではなく左上を指す仕様に変更**され、罫線条件なしで領域を探索します） |
 | `book.get_bordered_table_by_header(sheet, header_values, value_header_contains=..., header_row=...)` | `book.get_bordered_table(sheet, header_values=..., value_header_contains=..., header_rows=...)` |
 | `book.get_bordered_table_by_columns(sheet, header_values, ...)` | `book.get_bordered_table(sheet, header_values=..., columns="selected", ...)` |
 | `SelectedColumnsTable` | `BorderTable`（`partial=True` の部分テーブル） |

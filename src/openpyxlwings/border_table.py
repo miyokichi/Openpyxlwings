@@ -410,6 +410,136 @@ def detect_bordered_table(
     )
 
 
+def detect_table_region(
+    workbook: ExcelWorkbook,
+    worksheet: Worksheet,
+    sheet: str | None,
+    row: int,
+    column: int,
+    *,
+    header_rows: int = 1,
+    header_columns: int = 0,
+) -> BorderTable:
+    """Detect a table from its top-left cell by growing right and down.
+
+    Unlike border-based detection this accepts tables that are values only,
+    borders only, or bordered with gaps: a cell belongs to the region when it
+    has a value or any border. The region grows column by column and row by
+    row until it hits a row/column with no content inside the current span.
+    A lone top border on the next row (or a lone left border on the next
+    column) counts as the table's closing line, not as content.
+    """
+
+    _validate_position(row, column)
+
+    end_row, end_column = _grow_table_region(worksheet, row, column)
+    if end_row == row and end_column == column and not _cell_has_content(worksheet, row, column):
+        raise BorderTableNotFoundError("A table was not found at the start cell.")
+
+    columns = [
+        [cell.value for cell in column_cells]
+        for column_cells in worksheet.iter_cols(
+            min_row=row,
+            max_row=end_row,
+            min_col=column,
+            max_col=end_column,
+        )
+    ]
+    return BorderTable(
+        workbook=workbook,
+        sheet=sheet,
+        start_row=row,
+        start_column=column,
+        columns=columns,
+        header_rows=header_rows,
+        header_columns=header_columns,
+    )
+
+
+def _grow_table_region(
+    worksheet: Worksheet,
+    start_row: int,
+    start_column: int,
+) -> tuple[int, int]:
+    """Return the bottom-right corner of the region anchored at the top-left.
+
+    Growth alternates between right and down until neither direction extends,
+    so an L-shaped run of content still yields its full bounding box.
+    """
+
+    max_row = worksheet.max_row
+    max_column = worksheet.max_column
+    end_row = start_row
+    end_column = start_column
+
+    changed = True
+    while changed:
+        changed = False
+        while end_column < max_column and _column_extends_region(
+            worksheet, end_column + 1, start_row, end_row
+        ):
+            end_column += 1
+            changed = True
+        while end_row < max_row and _row_extends_region(
+            worksheet, end_row + 1, start_column, end_column
+        ):
+            end_row += 1
+            changed = True
+
+    return end_row, end_column
+
+
+def _row_extends_region(
+    worksheet: Worksheet,
+    row: int,
+    start_column: int,
+    end_column: int,
+) -> bool:
+    """Whether the candidate row below the region carries table content.
+
+    A cell whose only border is a top border is treated as the closing line
+    of the row above, so it does not pull the candidate row into the table.
+    """
+
+    for column in range(start_column, end_column + 1):
+        cell = worksheet.cell(row=row, column=column)
+        if cell.value is not None:
+            return True
+        border = cell.border
+        if _has_side(border.bottom) or _has_side(border.left) or _has_side(border.right):
+            return True
+    return False
+
+
+def _column_extends_region(
+    worksheet: Worksheet,
+    column: int,
+    start_row: int,
+    end_row: int,
+) -> bool:
+    """Whether the candidate column right of the region carries table content.
+
+    A cell whose only border is a left border is treated as the closing line
+    of the column to the left, so it does not pull the candidate column into
+    the table.
+    """
+
+    for row in range(start_row, end_row + 1):
+        cell = worksheet.cell(row=row, column=column)
+        if cell.value is not None:
+            return True
+        border = cell.border
+        if _has_side(border.right) or _has_side(border.top) or _has_side(border.bottom):
+            return True
+    return False
+
+
+def _cell_has_content(worksheet: Worksheet, row: int, column: int) -> bool:
+    if worksheet.cell(row=row, column=column).value is not None:
+        return True
+    return _cell_has_any_border(worksheet, row, column)
+
+
 def detect_bordered_table_by_header(
     workbook: ExcelWorkbook,
     worksheet: Worksheet,
