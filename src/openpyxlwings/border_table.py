@@ -417,7 +417,7 @@ def detect_bordered_table_by_header(
     header_values: list[CellValue],
     *,
     value_header_contains: str,
-    header_row: int = 1,
+    header_rows: int = 1,
     match_case: bool = False,
     require_inner_borders: bool = True,
 ) -> BorderTable:
@@ -425,8 +425,8 @@ def detect_bordered_table_by_header(
 
     if not header_values:
         raise BorderTableShapeError("header_values must contain at least one value.")
-    if header_row < 1:
-        raise BorderTableShapeError("header_row must be 1 or greater.")
+    if header_rows < 1:
+        raise BorderTableShapeError("header_rows must be 1 or greater.")
     if not value_header_contains:
         raise BorderTableShapeError("value_header_contains cannot be empty.")
 
@@ -437,11 +437,11 @@ def detect_bordered_table_by_header(
         worksheet,
         sheet,
         anchors,
-        header_row=header_row,
+        header_row=header_rows,
         header_columns=header_width,
         require_inner_borders=require_inner_borders,
     ):
-        relative_header_row = [column[header_row - 1] for column in table.columns]
+        relative_header_row = [column[header_rows - 1] for column in table.columns]
         first_value_column = _find_first_value_header_column(
             relative_header_row,
             value_header_contains,
@@ -458,7 +458,7 @@ def detect_bordered_table_by_header(
                 "header_values must cover every row-header column before the value area."
             )
 
-        table.header_rows = header_row
+        table.header_rows = header_rows
         table.header_columns = first_value_column - 1
         table._validate_shape()
         return table
@@ -473,7 +473,7 @@ def detect_bordered_table_by_columns(
     header_values: list[CellValue],
     *,
     value_header_contains: str | None = None,
-    header_row: int = 1,
+    header_rows: int = 1,
     match_case: bool = False,
     require_inner_borders: bool = True,
 ) -> BorderTable:
@@ -489,8 +489,8 @@ def detect_bordered_table_by_columns(
 
     if not header_values:
         raise BorderTableShapeError("header_values must contain at least one value.")
-    if header_row < 1:
-        raise BorderTableShapeError("header_row must be 1 or greater.")
+    if header_rows < 1:
+        raise BorderTableShapeError("header_rows must be 1 or greater.")
 
     anchors = _iter_value_anchor_cells(worksheet, header_values[0], match_case=match_case)
     for row, _anchor_column, table in _iter_candidate_tables(
@@ -498,7 +498,7 @@ def detect_bordered_table_by_columns(
         worksheet,
         sheet,
         anchors,
-        header_row=header_row,
+        header_row=header_rows,
         header_columns=0,
         require_inner_borders=require_inner_borders,
     ):
@@ -529,7 +529,7 @@ def detect_bordered_table_by_columns(
             start_row=table.start_row,
             start_column=table.start_column,
             columns=columns,
-            header_rows=header_row,
+            header_rows=header_rows,
             header_columns=len(header_values),
             source_columns=list(selected),
             partial=True,

@@ -17,7 +17,11 @@ from openpyxlwings.border_table import (
     detect_bordered_table_by_columns,
     detect_bordered_table_by_header,
 )
-from openpyxlwings.exceptions import ExcelWriteError, SheetNotFoundError
+from openpyxlwings.exceptions import (
+    BorderTableShapeError,
+    ExcelWriteError,
+    SheetNotFoundError,
+)
 from openpyxlwings.format import ExtractedMatch, TablePattern, extract_pattern
 
 if TYPE_CHECKING:
@@ -230,83 +234,98 @@ class ExcelWorkbook:
 
     def get_bordered_table(
         self,
-        sheet: str | None,
-        row: int,
-        column: int,
+        sheet: str | None = None,
         *,
+        row: int | None = None,
+        column: int | None = None,
+        header_values: list[CellValue] | None = None,
+        value_header_contains: str | None = None,
+        columns: str = "all",
         header_rows: int = 1,
         header_columns: int = 0,
+        match_case: bool = False,
         require_inner_borders: bool = True,
     ) -> BorderTable:
-        """Detect a bordered table that contains ``row``/``column``.
+        """Detect a bordered table, located by cell position or by headers.
+
+        Exactly one way of locating the table must be given:
+
+        - ``row``/``column``: the table containing that cell is detected.
+          ``header_rows``/``header_columns`` describe its header area.
+        - ``header_values``: the table whose ``header_rows``-th row carries the
+          given values is searched for. With ``columns="all"`` (default) the
+          values must cover every row-header column from the left edge, and
+          ``value_header_contains`` (required) marks where the value columns
+          begin; the whole rectangle is returned. With ``columns="selected"``
+          only the matching columns (plus every column whose header contains
+          ``value_header_contains``, if given) are held as a partial table,
+          and writing back leaves unselected columns untouched.
 
         Pass ``require_inner_borders=False`` to read tables whose inner
         gridlines are partly missing; only the outer frame is required.
         """
 
-        worksheet = self._reader.styled_sheet(sheet)
-        return detect_bordered_table(
-            self,
-            worksheet,
-            sheet,
-            row,
-            column,
-            header_rows=header_rows,
-            header_columns=header_columns,
-            require_inner_borders=require_inner_borders,
-        )
+        if columns not in ("all", "selected"):
+            raise BorderTableShapeError('columns must be "all" or "selected".')
 
-    def get_bordered_table_by_header(
-        self,
-        sheet: str | None,
-        header_values: list[CellValue],
-        *,
-        value_header_contains: str,
-        header_row: int = 1,
-        match_case: bool = False,
-        require_inner_borders: bool = True,
-    ) -> BorderTable:
-        """Detect a bordered table by header values and value-column text."""
+        by_position = row is not None or column is not None
+        by_headers = header_values is not None
+        if by_position == by_headers:
+            raise BorderTableShapeError(
+                "pass either row/column or header_values to locate the table."
+            )
 
         worksheet = self._reader.styled_sheet(sheet)
+
+        if by_position:
+            if row is None or column is None:
+                raise BorderTableShapeError("row and column must be given together.")
+            if value_header_contains is not None:
+                raise BorderTableShapeError(
+                    "value_header_contains requires header_values."
+                )
+            if columns != "all":
+                raise BorderTableShapeError(
+                    'columns="selected" requires header_values.'
+                )
+            return detect_bordered_table(
+                self,
+                worksheet,
+                sheet,
+                row,
+                column,
+                header_rows=header_rows,
+                header_columns=header_columns,
+                require_inner_borders=require_inner_borders,
+            )
+
+        if header_columns:
+            raise BorderTableShapeError(
+                "header_columns is derived from header_values; do not pass it."
+            )
+        if columns == "selected":
+            return detect_bordered_table_by_columns(
+                self,
+                worksheet,
+                sheet,
+                header_values,
+                value_header_contains=value_header_contains,
+                header_rows=header_rows,
+                match_case=match_case,
+                require_inner_borders=require_inner_borders,
+            )
+        if not value_header_contains:
+            raise BorderTableShapeError(
+                'value_header_contains is required when columns="all" '
+                "and the table is located by header_values."
+            )
         return detect_bordered_table_by_header(
             self,
             worksheet,
             sheet,
             header_values,
             value_header_contains=value_header_contains,
-            header_row=header_row,
-            match_case=match_case,
-            require_inner_borders=require_inner_borders,
-        )
-
-    def get_bordered_table_by_columns(
-        self,
-        sheet: str | None,
-        header_values: list[CellValue],
-        *,
-        value_header_contains: str | None = None,
-        header_row: int = 1,
-        match_case: bool = False,
-        require_inner_borders: bool = True,
-    ) -> BorderTable:
-        """Detect a bordered table and hold only a subset of its columns.
-
-        ``header_values`` (exact match, order preserved) and the optional
-        ``value_header_contains`` (substring match, every matching column)
-        choose which columns are read into an editable partial table. Each
-        selected column is read top-down while a cell has a value, a top
-        border, or a bottom border.
-        """
-
-        worksheet = self._reader.styled_sheet(sheet)
-        return detect_bordered_table_by_columns(
-            self,
-            worksheet,
-            sheet,
-            header_values,
-            value_header_contains=value_header_contains,
-            header_row=header_row,
+            header_rows=header_rows,
             match_case=match_case,
             require_inner_borders=require_inner_borders,
         )

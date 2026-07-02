@@ -135,7 +135,7 @@ def create_amount_header_sheet(workbook: Workbook) -> None:
     set_widths(sheet, [4, 18, 18, 14, 14, 18, 4])
 
     sheet["B10"] = "Manual test:"
-    sheet["B11"] = 'table = book.get_bordered_table_by_header("AmountHeaders", ["header1", "header2"], value_header_contains="amount")'
+    sheet["B11"] = 'table = book.get_bordered_table("AmountHeaders", header_values=["header1", "header2"], value_header_contains="amount")'
     sheet["B12"] = "print(table.row_headers); print(table.column_headers); print(table.data)"
     sheet["B11"].font = Font(name="Consolas", size=10)
     sheet["B12"].font = Font(name="Consolas", size=10)

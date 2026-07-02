@@ -60,7 +60,7 @@ def test_selects_only_requested_header_column(tmp_path: Path) -> None:
     make_amount_workbook(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table_by_columns("Amount", ["header1"])
+        table = workbook.get_bordered_table("Amount", header_values=["header1"], columns="selected")
 
     assert table.partial is True
     assert [column[0] for column in table.columns] == ["header1"]
@@ -74,10 +74,11 @@ def test_value_header_contains_selects_every_amount_column(tmp_path: Path) -> No
     make_amount_workbook(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table_by_columns(
+        table = workbook.get_bordered_table(
             "Amount",
-            ["header1"],
+            header_values=["header1"],
             value_header_contains="amount",
+            columns="selected",
         )
 
     # header2 is not requested, so it is excluded; both amount columns appear.
@@ -102,10 +103,11 @@ def test_continuation_includes_bordered_empty_cell(tmp_path: Path) -> None:
     )
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table_by_columns(
+        table = workbook.get_bordered_table(
             "Gap",
-            ["key"],
+            header_values=["key"],
             value_header_contains="amount",
+            columns="selected",
         )
 
     assert table.row_headers == [["a"], ["b"], ["c"]]
@@ -126,11 +128,12 @@ def test_header_on_second_table_row_keeps_title_row(tmp_path: Path) -> None:
     )
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table_by_columns(
+        table = workbook.get_bordered_table(
             "Titled",
-            ["key"],
+            header_values=["key"],
             value_header_contains="amount",
-            header_row=2,
+            columns="selected",
+            header_rows=2,
         )
 
     assert table.header_rows == 2
@@ -184,7 +187,7 @@ def test_decoy_first_header_on_same_row_is_skipped(tmp_path: Path) -> None:
     book.save(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table_by_columns("Amount", ["header1"])
+        table = workbook.get_bordered_table("Amount", header_values=["header1"], columns="selected")
 
     assert [column[0] for column in table.columns] == ["header1"]
     assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
@@ -196,7 +199,7 @@ def test_missing_header_raises(tmp_path: Path) -> None:
 
     with ExcelWorkbook(path) as workbook:
         with pytest.raises(BorderTableNotFoundError):
-            workbook.get_bordered_table_by_columns("Amount", ["nope"])
+            workbook.get_bordered_table("Amount", header_values=["nope"], columns="selected")
 
 
 def test_add_row_and_add_column_update_partial_table(tmp_path: Path) -> None:
@@ -204,10 +207,11 @@ def test_add_row_and_add_column_update_partial_table(tmp_path: Path) -> None:
     make_amount_workbook(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table_by_columns(
+        table = workbook.get_bordered_table(
             "Amount",
-            ["header1"],
+            header_values=["header1"],
             value_header_contains="amount",
+            columns="selected",
         )
 
     table.add_row([700, 800], row_headers=["col4a"])
@@ -228,10 +232,11 @@ def test_find_body_row_and_set_body_row_by_header(tmp_path: Path) -> None:
     make_amount_workbook(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table_by_columns(
+        table = workbook.get_bordered_table(
             "Amount",
-            ["header1"],
+            header_values=["header1"],
             value_header_contains="amount",
+            columns="selected",
         )
 
     assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
@@ -273,10 +278,11 @@ def test_row_header_lookup_rejects_bad_row_header(tmp_path: Path) -> None:
     make_amount_workbook(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table_by_columns(
+        table = workbook.get_bordered_table(
             "Amount",
-            ["header1"],
+            header_values=["header1"],
             value_header_contains="amount",
+            columns="selected",
         )
 
     with pytest.raises(BorderTableShapeError, match="was not found"):
@@ -314,7 +320,7 @@ def test_add_row_rejects_wrong_width(tmp_path: Path) -> None:
     make_amount_workbook(path)
 
     with ExcelWorkbook(path) as workbook:
-        table = workbook.get_bordered_table_by_columns("Amount", ["header1"])
+        table = workbook.get_bordered_table("Amount", header_values=["header1"], columns="selected")
 
     with pytest.raises(BorderTableShapeError):
         table.add_row(["too", "many"])

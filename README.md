@@ -30,6 +30,7 @@ openpyxlwings
 - [Excelフォーマットから表を抽出する](#excelフォーマットから表を抽出する)
 - [API 一覧](#api-一覧)
 - [互換用の名前](#互換用の名前)
+- [旧APIからの移行](#旧apiからの移行)
 - [CLI](#cli)
 - [開発メモ](#開発メモ)
 - [ライセンス](#ライセンス)
@@ -450,8 +451,7 @@ plan = (
 | `plan.write_values_at(sheet, row, column, values, expand=False)` | 行番号・列番号での書き込みを予約する |
 | `plan.clear_contents(sheet, address)` | 指定範囲のクリアを予約する |
 | `plan.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号での範囲クリアを予約する |
-| `plan.add_bordered_table(table)` | 罫線テーブルの編集内容（スナップショット）を予約する |
-| `plan.add_selected_columns_table(table)` | 列指定の仮想テーブルの編集内容（スナップショット）を予約する |
+| `plan.add_bordered_table(table)` | 罫線テーブル（全体・部分どちらも）の編集内容（スナップショット）を予約する |
 | `plan.clear()` | 予約した指示をすべて取り消す |
 | `len(plan)` | 予約済みの指示の数を返す |
 
@@ -588,6 +588,21 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
 `table.data` は見出しを除いた本体を **列ごとのリスト**（列方向優先）で返します。
 
+`get_bordered_table()` は表の探し方が2通りあり、引数の組み合わせで切り替えます。
+
+| 引数 | 内容 |
+| --- | --- |
+| `row` / `column` | 起点セルの位置で探す（両方必須）。`header_values` とは併用不可 |
+| `header_values` | 見出し行の値で探す。`row`/`column` とは併用不可 |
+| `value_header_contains` | 値領域の列見出しに含まれる文字列（部分一致）。`columns="all"` では必須、`"selected"` では任意 |
+| `columns` | `"all"`（既定・表全体）か `"selected"`（指定列のみの部分テーブル） |
+| `header_rows` | 見出しの行数。見出し指定のときは「表の何行目が見出しか」の意味にもなる |
+| `header_columns` | 行見出しの列数（起点セル指定のときのみ。見出し指定では自動決定） |
+| `match_case` | 見出し比較で大文字小文字を区別するか（既定は区別しない） |
+| `require_inner_borders` | 内側の格子線をすべて要求するか（既定は要求。`False` で外枠のみ） |
+
+見出しで探す2つのモード（`columns="all"` / `"selected"`）の詳しい動きは後述します。
+
 ### 内側の罫線が欠けている表を読む
 
 既定では、表の内側のすべての格子線がそろっていることを要求します。
@@ -612,7 +627,7 @@ with ExcelWorkbook("report.xlsx") as book:
 ```
 
 内側の格子線は値の読み取りには使っていない（範囲内の全セルをそのまま読む）ため、外枠さえそろっていれば内側がどれだけ欠けていても読み取れます。
-`get_bordered_table_by_header()` にも同じ `require_inner_borders` 引数があります。
+`require_inner_borders` は見出しから表を探す場合（後述の `header_values` 指定）にも同じように使えます。
 
 この検出は「外枠の外側のセルには罫線がない（＝表は罫線のない余白で囲まれている）」ことを前提にしています。
 別の表とすき間なく隣接していたり、外側に飾り罫線があると、範囲を広く拾ってしまうことがあります。
@@ -691,7 +706,8 @@ v1では罫線のみを整え、塗りつぶしやフォント、表示形式の
 
 ### 見出し行の値から罫線テーブルを探す
 
-次のように、左側に行見出し列があり、右側に `amount` のような値列が複数続く表も取得できます。
+セル位置がわからなくても、`header_values` を指定すると見出しの値から表を探せます。
+次のように、左側に行見出し列があり、右側に `amount` のような値列が複数続く表を想定しています。
 
 ```text
 header1      header2       amount   amount
@@ -707,7 +723,7 @@ header_col3  header2_col3
 from openpyxlwings import ExcelWorkbook
 
 with ExcelWorkbook("report.xlsx") as book:
-    table = book.get_bordered_table_by_header(
+    table = book.get_bordered_table(
         "Sheet1",
         header_values=["header1", "header2"],
         value_header_contains="amount",
@@ -719,14 +735,20 @@ with ExcelWorkbook("report.xlsx") as book:
 ```
 
 この例では、`header1` と `header2` が行見出し列、`amount` を含む列が値領域の列見出しになります。
-文字比較はデフォルトで大文字小文字を区別しません。
+文字比較はデフォルトで大文字小文字を区別しません（`match_case=True` で区別）。
 
-### 列見出しの一部だけ指定して取得する（仮想テーブル）
+このモード（`columns="all"`、既定）では次の条件があります。
 
-`get_bordered_table_by_header()` は表の列見出しを **すべて** 指定する必要がありますが、
-`get_bordered_table_by_columns()` は **必要な列だけ** を指定して、その列のデータだけを
-取得します。取得結果は **仮想テーブル**（`SelectedColumnsTable`）として扱え、行・列の
-追加ができます。Excelへ書き戻すときは取得した列・追加した行/列にだけ書き込み、
+- `header_values` は表の見出し行に **左端から連続して・この順番で** 並んでいる必要があります
+- `header_values` は行見出し列を **すべて** カバーしている必要があります（足りないとエラー）
+- `value_header_contains` は必須で、値領域の始まりを決めます
+- 見出しが表の1行目にない場合は `header_rows=2` のように見出し行の位置を指定します
+
+### 列見出しの一部だけ指定して取得する（部分テーブル）
+
+`columns="selected"` を指定すると、**必要な列だけ** を指定してその列のデータだけを
+取得できます。戻り値は同じ `BorderTable` ですが `partial=True` の **部分テーブル** になり、
+Excelへ書き戻すときは取得した列・追加した行/列にだけ書き込み、
 取得していない既存列は変更しません。
 
 ```text
@@ -740,44 +762,56 @@ header_col3  header2_col3  500      600
 from openpyxlwings import ExcelWorkbook
 
 with ExcelWorkbook("report.xlsx") as book:
-    table = book.get_bordered_table_by_columns(
+    table = book.get_bordered_table(
         "Sheet1",
         header_values=["header1"],          # 完全一致（リストで複数指定可・順序保持）
         value_header_contains="amount",      # 部分一致（含む列をすべて取得・任意）
+        columns="selected",
     )
 
-    print(table.column_headers)   # ['header1', 'amount', 'amount']（header2 は含まれない）
-    print(table.data)             # [['header_col1', ...], [100, ...], [200, ...]]（列ごとのリスト）
+    print(table.column_headers)   # [['amount', 'amount']]（値列の見出し。header2 は含まれない）
+    print(table.row_headers)      # [['header_col1'], ['header_col2'], ['header_col3']]
+    print(table.data)             # [[100, 300, 500], [200, 400, 600]]（値列を列ごとのリストで）
+    print(table.source_columns)   # 各列の元のExcel列番号。メモリ上で追加した列は None
 
-    # 仮想テーブルとして編集できる
-    table.add_row(["header_col4", 700, 800])
-    table.add_column([1, 2, 3, 4], header="ratio")
+    # 部分テーブルとして編集できる
+    table.add_row([700, 800], row_headers=["header_col4"])
+    table.add_column([1, 2, 3, 4], column_headers=["ratio"])
 
-    table.save()  # 取得列＋追加分のみ書き戻し（末尾に行/列を挿入）
+    table.save()  # 取得列＋追加分のみ書き戻し
 ```
 
-各列のデータは見出しの1つ下から **上から順に** 読み取り、セルに
+`columns="all"` と違い、`header_values` は表の見出し行の **どこにあってもよく**、
+連続している必要もありません。指定した列が行見出し列（`row_headers`）になり、
+`value_header_contains` に一致した列が本文（`data`）になります。
+
+各列のデータは表の先頭行から読み取り、見出しより下は
 **値がある / 上罫線がある / 下罫線がある** いずれかなら継続、いずれもなければ終了します。
 列ごとに長さが異なる場合は `None` で埋めて矩形化します。
 
-`WritePlan` にも `plan.add_selected_columns_table(table)` で予約でき、
-`book.apply(plan)` のタイミングまで書き込みを遅延できます。
+書き戻し時の動きは全体テーブルと少し異なります。
 
-### 仮想テーブルでも行見出しで本文行を探す
+- 途中に挿入した行は Excel 上でもその位置に行挿入されます
+- 追加した列は、仮想的な挿入位置にかかわらず表の **右端** に追加されます
+- 表の見出しより上の行（タイトル行など）は書き換えません
 
-罫線テーブルの `find_body_row()` / `set_body_row_by_header()` と同じ操作が、
-`SelectedColumnsTable`（仮想テーブル）でも使えます。行見出しとして扱われるのは
-`header_values` で指定した列（完全一致で選んだ列）で、`value_header_contains`
-で選んだ列は本文（値）列として扱われます。
+`WritePlan` への予約は全体・部分どちらも `plan.add_bordered_table(table)` です。
+
+### 部分テーブルでも行見出しで本文行を探す
+
+`find_body_row()` / `set_body_row_by_header()` は部分テーブルでも同じように使えます。
+行見出しとして扱われるのは `header_values` で指定した列（完全一致で選んだ列）で、
+`value_header_contains` で選んだ列は本文（値）列として扱われます。
 
 ```python
 from openpyxlwings import ExcelWorkbook
 
 with ExcelWorkbook("report.xlsx", visible=False) as book:
-    table = book.get_bordered_table_by_columns(
+    table = book.get_bordered_table(
         "Sheet1",
         header_values=["header1"],
         value_header_contains="amount",
+        columns="selected",
     )
 
     row = table.find_body_row("header_col1")
@@ -787,6 +821,28 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
     table.save()
 ```
+
+### 表の検出条件と、見つからないときのチェックリスト
+
+どの指定方法でも、表そのものは罫線から検出します。条件は次のとおりです。
+
+- 外枠（上下左右）が完全にそろっていること
+- 既定では内側の格子線もすべてそろっていること（`require_inner_borders=False` で外枠のみに緩和）
+- 範囲内に結合セルがないこと
+- 最低でも 2行×2列 あること
+- 表のすぐ外側のセルには罫線がないこと（隣接する別の表や飾り罫線があると範囲を広く拾います）
+
+`header_values` で探す場合は、さらに次の条件があります。
+
+- 見出しの比較は「前後の空白を除去した文字列の完全一致」です。既定では大文字小文字を
+  区別しませんが、**見出し内部の空白・全角半角・セル内改行の違いは不一致** になります
+- 一致セルは候補として順に試され、罫線テーブルとして成立しない候補は読み飛ばされます
+- 一致した行が表の `header_rows` 行目（既定では1行目）である必要があります。
+  枠内の見出しより上にタイトル行がある表は `header_rows=2` のように指定します
+
+見つからないときは、(1) 結合セルが混ざっていないか、(2) 内側の罫線が欠けていないか、
+(3) 見出しの文字列が完全一致しているか、(4) `header_rows` が実際の見出し位置と
+合っているか、の順に確認するのが早道です。
 
 `header_values` を複数指定した場合は、`("header_col1", "header2_col1")` のように
 すべての行見出し値を指定します。同じ行見出しに複数行が一致する場合は、誤更新を
@@ -959,9 +1015,7 @@ from openpyxlwings import ExcelWorkbook, WritePlan
 | `book.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号で指定範囲の値や数式だけを消す |
 | `WritePlan()` | 書き込み指示を貯めるオブジェクトを作る |
 | `book.apply(plan, save=True)` | `WritePlan` に貯めた書き込みをまとめて実行する |
-| `book.get_bordered_table(sheet, row, column, header_rows=1, header_columns=0, require_inner_borders=True)` | 起点セルを含む罫線テーブルを取得する（`require_inner_borders=False` で内側の罫線欠けを許容） |
-| `book.get_bordered_table_by_header(sheet, header_values, value_header_contains=...)` | 見出し行の値と値列見出しの文字列から罫線テーブルを取得する |
-| `book.get_bordered_table_by_columns(sheet, header_values, value_header_contains=None)` | 列見出しの一部だけ指定して、その列のデータを仮想テーブルとして取得する |
+| `book.get_bordered_table(sheet, *, row=None, column=None, header_values=None, value_header_contains=None, columns="all", header_rows=1, header_columns=0, match_case=False, require_inner_borders=True)` | 罫線テーブルを取得する。`row`/`column`（起点セル指定）か `header_values`（見出し指定）のどちらかで表を探し、`columns="selected"` で指定列のみの部分テーブルを返す |
 | `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
 | `book.extract(pattern, sheets=None, ranges=None)` | フォーマットに一致する表をすべて抽出する |
 | `book.save(path=None)` | 明示的に保存する |
@@ -979,6 +1033,33 @@ from openpyxlwings import ExcelReader, ExcelWriter
 assert ExcelReader is ExcelWorkbook
 assert ExcelWriter is ExcelWorkbook
 ```
+
+旧APIからの移行
+---------------
+
+罫線テーブルの取得APIは `get_bordered_table()` 1本に統合しました。
+旧APIと旧クラスは削除済みです。次の対応で書き換えてください。
+
+| 旧 | 新 |
+| --- | --- |
+| `book.get_bordered_table(sheet, row, column, ...)` | `book.get_bordered_table(sheet, row=row, column=column, ...)`（キーワード引数に変更） |
+| `book.get_bordered_table_by_header(sheet, header_values, value_header_contains=..., header_row=...)` | `book.get_bordered_table(sheet, header_values=..., value_header_contains=..., header_rows=...)` |
+| `book.get_bordered_table_by_columns(sheet, header_values, ...)` | `book.get_bordered_table(sheet, header_values=..., columns="selected", ...)` |
+| `SelectedColumnsTable` | `BorderTable`（`partial=True` の部分テーブル） |
+| `plan.add_selected_columns_table(table)` | `plan.add_bordered_table(table)` |
+
+部分テーブル（旧 `SelectedColumnsTable`）はプロパティやメソッドの形も全体テーブルに揃えたため、以下が変わっています。
+
+| 項目 | 旧 `SelectedColumnsTable` | 新 `BorderTable`（`columns="selected"`） |
+| --- | --- | --- |
+| `data` | 選択した全列（行見出し列を含む）の本文 | 行見出し列を **除いた** 本文（列ごとのリスト） |
+| `column_headers` | 全列の見出しのフラットなリスト | 本文列のみの見出し行のリスト（`[[...]]`） |
+| `columns` | `_SelectedColumn` のリスト | 見出しを含む値の列リスト。元のExcel列は `source_columns` |
+| `row_count` | 本文の行数 | 見出しを含むグリッドの行数 |
+| `add_row(values)` | 全列分の値を1つのリストで渡す | 本文列分の `values` と `row_headers=` に分けて渡す |
+| `add_column(values, header=...)` | 見出しはスカラーの `header=` | 見出しは `column_headers=[...]`（リスト） |
+| `set_value(row, column, ...)` | 本文基準の座標 | 見出しを含む表全体の座標（本文基準は `set_body_value()`） |
+| 途中への行挿入 | 保存時は末尾にまとめて挿入 | 保存時もその位置に行挿入 |
 
 CLI
 ---
