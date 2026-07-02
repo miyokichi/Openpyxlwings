@@ -134,6 +134,34 @@ def test_get_bordered_table_by_header_skips_decoy_header_text(tmp_path: Path) ->
     assert table.range == "B3:D5"
 
 
+def test_get_table_by_header_reads_borderless_values(tmp_path: Path) -> None:
+    # Header search no longer needs any borders.
+    path = tmp_path / "plain.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Plain"
+    values = [
+        ["header1", "header2", "amount", "amount"],
+        ["header_col1", "header2_col1", 100, 200],
+        ["header_col2", "header2_col2", 300, 400],
+    ]
+    for row_offset, row in enumerate(values, start=2):
+        for column_offset, value in enumerate(row, start=2):
+            sheet.cell(row=row_offset, column=column_offset).value = value
+    workbook.save(path)
+
+    with ExcelWorkbook(path) as book:
+        table = book.get_bordered_table(
+            "Plain",
+            header_values=["header1", "header2"],
+            value_header_contains="amount",
+        )
+
+    assert table.range == "B2:E4"
+    assert table.header_columns == 2
+    assert table.data == [[100, 300], [200, 400]]
+
+
 def test_get_bordered_table_by_header_is_case_insensitive(tmp_path: Path) -> None:
     path = tmp_path / "amount.xlsx"
     make_amount_header_workbook(path)

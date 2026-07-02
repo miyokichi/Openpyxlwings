@@ -244,34 +244,30 @@ class ExcelWorkbook:
         header_rows: int = 1,
         header_columns: int = 0,
         match_case: bool = False,
-        require_inner_borders: bool = True,
     ) -> BorderTable:
         """Detect a table, located by its top-left cell or by headers.
+
+        Both ways of locating the table use the same content-based region
+        growth: a cell belongs to the table when it has a value or any border,
+        so values-only tables, borders-only tables, tables with missing
+        borders, and tables containing merged cells are all readable. The
+        region ends at the first row/column without content (a lone closing
+        border line does not count as content).
 
         Exactly one way of locating the table must be given:
 
         - ``row``/``column``: the cell is taken as the table's top-left corner
-          and the region is grown right and down. A cell belongs to the region
-          when it has a value or any border, so values-only tables, borders-
-          only tables, and tables with missing borders are all readable. The
-          region ends at the first row/column without content (a lone closing
-          border line does not count as content). ``header_rows``/
+          and the region is grown right and down. ``header_rows``/
           ``header_columns`` describe the header area.
-        - ``header_values``: the bordered table whose ``header_rows``-th row
-          carries the given values is searched for. With ``columns="all"``
-          (default) the values must cover every row-header column from the
-          left edge, and ``value_header_contains`` (required) marks where the
-          value columns begin; the whole rectangle is returned. With
+        - ``header_values``: the table whose ``header_rows``-th row carries
+          the given values is searched for. With ``columns="all"`` (default)
+          the values must cover every row-header column from the left edge,
+          and ``value_header_contains`` (required) marks where the value
+          columns begin; the whole rectangle is returned. With
           ``columns="selected"`` only the matching columns (plus every column
           whose header contains ``value_header_contains``, if given) are held
           as a partial table, and writing back leaves unselected columns
           untouched.
-
-        ``require_inner_borders`` applies to the ``header_values`` search,
-        which is border-based: pass ``False`` to accept tables whose inner
-        gridlines are partly missing (only the outer frame is required). The
-        top-left-cell search does not use borders as a requirement, so the
-        flag has no effect there.
         """
 
         if columns not in ("all", "selected"):
@@ -320,7 +316,6 @@ class ExcelWorkbook:
                 value_header_contains=value_header_contains,
                 header_rows=header_rows,
                 match_case=match_case,
-                require_inner_borders=require_inner_borders,
             )
         if not value_header_contains:
             raise BorderTableShapeError(
@@ -335,7 +330,6 @@ class ExcelWorkbook:
             value_header_contains=value_header_contains,
             header_rows=header_rows,
             match_case=match_case,
-            require_inner_borders=require_inner_borders,
         )
 
     def extract(

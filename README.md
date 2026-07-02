@@ -599,14 +599,13 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 | `header_rows` | 見出しの行数。見出し指定のときは「表の何行目が見出しか」の意味にもなる |
 | `header_columns` | 行見出しの列数（左上セル指定のときのみ。見出し指定では自動決定） |
 | `match_case` | 見出し比較で大文字小文字を区別するか（既定は区別しない） |
-| `require_inner_borders` | 見出し指定（`header_values`）のときのみ有効。内側の格子線をすべて要求するか（`False` で外枠のみ） |
 
 見出しで探す2つのモード（`columns="all"` / `"selected"`）の詳しい動きは後述します。
 
-### 左上セル指定は罫線がなくても読める
+### 罫線がなくても読める（検出のしくみ）
 
-左上セル指定の探索は「セルに **値があるか、何かしらの罫線があるか**」だけを見ます。
-そのため、次のような表がすべて同じ書き方で読めます。
+表の範囲探索は「セルに **値があるか、何かしらの罫線があるか**」だけを見ます。
+左上セル指定でも見出し指定でも同じ探索を使うので、次のような表がすべて同じ書き方で読めます。
 
 - 罫線がまったくない、値だけの表
 - 値が入っていない、罫線だけの表（これから値を流し込むテンプレートの枠など）
@@ -632,6 +631,9 @@ with ExcelWorkbook("report.xlsx") as book:
   **次の列が左罫線だけ**（＝右端の閉じ線）の場合は表の外とみなします
 - 右・下への拡張は互いに影響するため、どちらにも広がらなくなるまで繰り返します
   （L字型にデータが伸びていても外接矩形まで広がります）
+
+見出し指定の場合は、一致した見出しセルの `header_rows - 1` 行上を表の先頭行として、
+同じルールで左・右・下に範囲を広げます。
 
 つまり「値も罫線もない空の行・列で表が囲まれている」ことが唯一の前提です。
 表の中に完全に空の行（値も罫線もない行）があると、そこで表が終わったと判断されるので注意してください。
@@ -828,32 +830,26 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
 ### 表の検出条件と、見つからないときのチェックリスト
 
-検出の厳しさは指定方法で異なります。
+どちらの指定方法でも、表の範囲は同じ「値または罫線があるセルをたどる」領域探索で
+決まります（終了条件は前述）。罫線の欠け・罫線なし・値なし・結合セルをすべて許容し、
+前提は「値も罫線もない空の行・列で表が囲まれていること」だけです。
 
-**左上セル指定（`row`/`column`）** はゆるい検出です。
-条件は「値も罫線もない空の行・列で表が囲まれていること」だけで、
-罫線の欠け・罫線なし・値なし・結合セルをすべて許容します（終了条件は前述）。
+見出し指定（`header_values`）では、範囲の決め方と一致条件が次のようになります。
 
-**見出し指定（`header_values`）** は罫線ベースの検出で、次の条件があります。
-
-- 外枠（上下左右）が完全にそろっていること
-- 既定では内側の格子線もすべてそろっていること（`require_inner_borders=False` で外枠のみに緩和）
-- 範囲内に結合セルがないこと
-- 最低でも 2行×2列 あること
-- 表のすぐ外側のセルには罫線がないこと（隣接する別の表や飾り罫線があると範囲を広く拾います）
-
-さらに見出しの一致について次の条件があります。
-
+- 一致セルの `header_rows - 1` 行上を表の先頭行とみなし、そこから左右・下に範囲を広げます
 - 見出しの比較は「前後の空白を除去した文字列の完全一致」です。既定では大文字小文字を
   区別しませんが、**見出し内部の空白・全角半角・セル内改行の違いは不一致** になります
-- 一致セルは候補として順に試され、罫線テーブルとして成立しない候補は読み飛ばされます
-- 一致した行が表の `header_rows` 行目（既定では1行目）である必要があります。
-  枠内の見出しより上にタイトル行がある表は `header_rows=2` のように指定します
+- 一致セルは候補として順に試され、成立しない候補（見出し行の下に本文行がない、
+  値領域が見つからない等）は読み飛ばされます
 
-見出し指定で見つからないときは、(1) 結合セルが混ざっていないか、(2) 内側の罫線が
-欠けていないか、(3) 見出しの文字列が完全一致しているか、(4) `header_rows` が実際の
-見出し位置と合っているか、の順に確認するのが早道です。
+見出し指定で見つからないときは、(1) 見出しの文字列が完全一致しているか、
+(2) `header_rows` が実際の見出し位置と合っているか、(3) 見出し行の下に本文行が
+あるか、の順に確認するのが早道です。
 表の位置がわかっているなら、左上セル指定に切り替えるのが確実です。
+
+なお、表のすぐ隣（間に空の行・列がない位置）にメモ書きや別の表があると、
+領域探索がそれらを取り込んで範囲を広く判定します。表の周囲は1行・1列以上
+空けてください。
 
 `header_values` を複数指定した場合は、`("header_col1", "header2_col1")` のように
 すべての行見出し値を指定します。同じ行見出しに複数行が一致する場合は、誤更新を
@@ -1026,7 +1022,7 @@ from openpyxlwings import ExcelWorkbook, WritePlan
 | `book.clear_contents_at(sheet, start_row, start_column, end_row, end_column)` | 行番号・列番号で指定範囲の値や数式だけを消す |
 | `WritePlan()` | 書き込み指示を貯めるオブジェクトを作る |
 | `book.apply(plan, save=True)` | `WritePlan` に貯めた書き込みをまとめて実行する |
-| `book.get_bordered_table(sheet, *, row=None, column=None, header_values=None, value_header_contains=None, columns="all", header_rows=1, header_columns=0, match_case=False, require_inner_borders=True)` | 表を取得する。`row`/`column`（左上セル指定・罫線不要のゆるい探索）か `header_values`（見出し指定・罫線ベース）のどちらかで表を探し、`columns="selected"` で指定列のみの部分テーブルを返す |
+| `book.get_bordered_table(sheet, *, row=None, column=None, header_values=None, value_header_contains=None, columns="all", header_rows=1, header_columns=0, match_case=False)` | 表を取得する。`row`/`column`（左上セル指定）か `header_values`（見出し指定）のどちらかで表を探す。どちらも罫線不要のゆるい領域探索で、`columns="selected"` で指定列のみの部分テーブルを返す |
 | `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
 | `book.extract(pattern, sheets=None, ranges=None)` | フォーマットに一致する表をすべて抽出する |
 | `book.save(path=None)` | 明示的に保存する |
@@ -1058,6 +1054,7 @@ assert ExcelWriter is ExcelWorkbook
 | `book.get_bordered_table_by_columns(sheet, header_values, ...)` | `book.get_bordered_table(sheet, header_values=..., columns="selected", ...)` |
 | `SelectedColumnsTable` | `BorderTable`（`partial=True` の部分テーブル） |
 | `plan.add_selected_columns_table(table)` | `plan.add_bordered_table(table)` |
+| `require_inner_borders=...` | 廃止。検出が罫線を前提としなくなったため、引数ごと削除されました |
 
 部分テーブル（旧 `SelectedColumnsTable`）はプロパティやメソッドの形も全体テーブルに揃えたため、以下が変わっています。
 

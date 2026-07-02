@@ -348,68 +348,6 @@ class BorderTable:
         return headers
 
 
-def detect_bordered_table(
-    workbook: ExcelWorkbook,
-    worksheet: Worksheet,
-    sheet: str | None,
-    row: int,
-    column: int,
-    *,
-    header_rows: int = 1,
-    header_columns: int = 0,
-    require_inner_borders: bool = True,
-) -> BorderTable:
-    """Detect a rectangular bordered table containing ``row``/``column``.
-
-    By default every inner gridline must be present. Pass
-    ``require_inner_borders=False`` to tolerate missing inner borders: only the
-    outer frame is required, and the table extent is taken from the bounding
-    box of the connected bordered cells.
-    """
-
-    _validate_position(row, column)
-    _reject_merged_cell(worksheet, row, column)
-
-    if require_inner_borders:
-        start_row, start_column, end_row, end_column = _walk_inner_bounds(
-            worksheet, row, column
-        )
-    else:
-        start_row, start_column, end_row, end_column = _flood_outer_bounds(
-            worksheet, row, column
-        )
-
-    if start_row == end_row or start_column == end_column:
-        raise BorderTableNotFoundError("A bordered table was not found from the start cell.")
-
-    _validate_bordered_rectangle(
-        worksheet,
-        start_row,
-        start_column,
-        end_row,
-        end_column,
-        inner=require_inner_borders,
-    )
-    columns = [
-        [cell.value for cell in column_cells]
-        for column_cells in worksheet.iter_cols(
-            min_row=start_row,
-            max_row=end_row,
-            min_col=start_column,
-            max_col=end_column,
-        )
-    ]
-    return BorderTable(
-        workbook=workbook,
-        sheet=sheet,
-        start_row=start_row,
-        start_column=start_column,
-        columns=columns,
-        header_rows=header_rows,
-        header_columns=header_columns,
-    )
-
-
 def detect_table_region(
     workbook: ExcelWorkbook,
     worksheet: Worksheet,
@@ -432,7 +370,7 @@ def detect_table_region(
 
     _validate_position(row, column)
 
-    end_row, end_column = _grow_table_region(worksheet, row, column)
+    _, _, end_row, end_column = _grow_region(worksheet, row, column, row, column)
     if end_row == row and end_column == column and not _cell_has_content(worksheet, row, column):
         raise BorderTableNotFoundError("A table was not found at the start cell.")
 
@@ -456,25 +394,36 @@ def detect_table_region(
     )
 
 
-def _grow_table_region(
+def _grow_region(
     worksheet: Worksheet,
     start_row: int,
     start_column: int,
-) -> tuple[int, int]:
-    """Return the bottom-right corner of the region anchored at the top-left.
+    end_row: int,
+    end_column: int,
+    *,
+    grow_left: bool = False,
+) -> tuple[int, int, int, int]:
+    """Grow the initial rectangle over adjacent content and return its bounds.
 
-    Growth alternates between right and down until neither direction extends,
-    so an L-shaped run of content still yields its full bounding box.
+    Growth goes right and down (and left when ``grow_left`` is set) until no
+    direction extends, so an L-shaped run of content still yields its full
+    bounding box. The top edge never moves: callers know the table's first
+    row (the anchor itself, or derived from ``header_rows``).
     """
 
     max_row = worksheet.max_row
     max_column = worksheet.max_column
-    end_row = start_row
-    end_column = start_column
 
     changed = True
     while changed:
         changed = False
+        while (
+            grow_left
+            and start_column > 1
+            and _column_extends_region_left(worksheet, start_column - 1, start_row, end_row)
+        ):
+            start_column -= 1
+            changed = True
         while end_column < max_column and _column_extends_region(
             worksheet, end_column + 1, start_row, end_row
         ):
@@ -486,7 +435,7 @@ def _grow_table_region(
             end_row += 1
             changed = True
 
-    return end_row, end_column
+    return start_row, start_column, end_row, end_column
 
 
 def _row_extends_region(
@@ -534,6 +483,29 @@ def _column_extends_region(
     return False
 
 
+def _column_extends_region_left(
+    worksheet: Worksheet,
+    column: int,
+    start_row: int,
+    end_row: int,
+) -> bool:
+    """Whether the candidate column left of the region carries table content.
+
+    A cell whose only border is a right border is treated as the closing line
+    of the column to the right, so it does not pull the candidate column into
+    the table.
+    """
+
+    for row in range(start_row, end_row + 1):
+        cell = worksheet.cell(row=row, column=column)
+        if cell.value is not None:
+            return True
+        border = cell.border
+        if _has_side(border.left) or _has_side(border.top) or _has_side(border.bottom):
+            return True
+    return False
+
+
 def _cell_has_content(worksheet: Worksheet, row: int, column: int) -> bool:
     if worksheet.cell(row=row, column=column).value is not None:
         return True
@@ -549,9 +521,15 @@ def detect_bordered_table_by_header(
     value_header_contains: str,
     header_rows: int = 1,
     match_case: bool = False,
-    require_inner_borders: bool = True,
 ) -> BorderTable:
-    """Detect a bordered table by fixed header values and value-column text."""
+    """Detect a table by fixed header values and value-column text.
+
+    Every cell run matching ``header_values`` is tried as a candidate. The
+    table's first row is derived from ``header_rows`` (the match sits on the
+    ``header_rows``-th table row), and the extent is found with the same
+    content-based region growth as the top-left-cell search, so borders are
+    not required. Candidates without a body row below the header are skipped.
+    """
 
     if not header_values:
         raise BorderTableShapeError("header_values must contain at least one value.")
@@ -561,17 +539,21 @@ def detect_bordered_table_by_header(
         raise BorderTableShapeError("value_header_contains cannot be empty.")
 
     header_width = len(header_values)
-    anchors = _iter_sequence_anchor_cells(worksheet, header_values, match_case=match_case)
-    for row, _column, table in _iter_candidate_tables(
-        workbook,
-        worksheet,
-        sheet,
-        anchors,
-        header_row=header_rows,
-        header_columns=header_width,
-        require_inner_borders=require_inner_borders,
-    ):
-        relative_header_row = [column[header_rows - 1] for column in table.columns]
+    for row, column in _iter_sequence_anchor_cells(worksheet, header_values, match_case=match_case):
+        top_row = row - header_rows + 1
+        if top_row < 1:
+            continue
+
+        start_row, start_column, end_row, end_column = _grow_region(
+            worksheet, top_row, column, row, column, grow_left=True
+        )
+        if end_row <= row:
+            continue  # no body rows below the header row
+
+        relative_header_row = [
+            worksheet.cell(row=row, column=header_column).value
+            for header_column in range(start_column, end_column + 1)
+        ]
         first_value_column = _find_first_value_header_column(
             relative_header_row,
             value_header_contains,
@@ -588,12 +570,29 @@ def detect_bordered_table_by_header(
                 "header_values must cover every row-header column before the value area."
             )
 
-        table.header_rows = header_rows
-        table.header_columns = first_value_column - 1
-        table._validate_shape()
-        return table
+        columns = [
+            [cell.value for cell in column_cells]
+            for column_cells in worksheet.iter_cols(
+                min_row=start_row,
+                max_row=end_row,
+                min_col=start_column,
+                max_col=end_column,
+            )
+        ]
+        try:
+            return BorderTable(
+                workbook=workbook,
+                sheet=sheet,
+                start_row=start_row,
+                start_column=start_column,
+                columns=columns,
+                header_rows=header_rows,
+                header_columns=first_value_column - 1,
+            )
+        except BorderTableShapeError:
+            continue  # malformed candidate; keep searching
 
-    raise BorderTableNotFoundError("A bordered table matching the header values was not found.")
+    raise BorderTableNotFoundError("A table matching the header values was not found.")
 
 
 def detect_bordered_table_by_columns(
@@ -605,16 +604,17 @@ def detect_bordered_table_by_columns(
     value_header_contains: str | None = None,
     header_rows: int = 1,
     match_case: bool = False,
-    require_inner_borders: bool = True,
 ) -> BorderTable:
-    """Detect a bordered table and hold only a subset of its columns.
+    """Detect a table and hold only a subset of its columns.
 
     ``header_values`` are matched exactly (order preserved) anywhere on the
     table's header row. When ``value_header_contains`` is given, every header
-    cell that contains the text is also selected (left to right). Each
-    selected column is read from the table's first row down; below the header
-    the read continues while a cell has a value, a top border, or a bottom
-    border, and ragged columns are squared up with ``None``.
+    cell that contains the text is also selected (left to right). The table
+    extent is found with the same content-based region growth as the
+    top-left-cell search, so borders are not required. Each selected column
+    is read from the table's first row down; below the header the read
+    continues while a cell has a value, a top border, or a bottom border, and
+    ragged columns are squared up with ``None``.
     """
 
     if not header_values:
@@ -622,21 +622,22 @@ def detect_bordered_table_by_columns(
     if header_rows < 1:
         raise BorderTableShapeError("header_rows must be 1 or greater.")
 
-    anchors = _iter_value_anchor_cells(worksheet, header_values[0], match_case=match_case)
-    for row, _anchor_column, table in _iter_candidate_tables(
-        workbook,
-        worksheet,
-        sheet,
-        anchors,
-        header_row=header_rows,
-        header_columns=0,
-        require_inner_borders=require_inner_borders,
-    ):
+    for row, column in _iter_value_anchor_cells(worksheet, header_values[0], match_case=match_case):
+        top_row = row - header_rows + 1
+        if top_row < 1:
+            continue
+
+        start_row, start_column, end_row, end_column = _grow_region(
+            worksheet, top_row, column, row, column, grow_left=True
+        )
+        if end_row <= row:
+            continue  # no body rows below the header row
+
         selected = _select_source_columns(
             worksheet,
             row,
-            table.start_column,
-            table.end_column,
+            start_column,
+            end_column,
             header_values,
             value_header_contains,
             match_case=match_case,
@@ -648,27 +649,30 @@ def detect_bordered_table_by_columns(
         for source in selected:
             values = [
                 worksheet.cell(row=header_area_row, column=source).value
-                for header_area_row in range(table.start_row, row + 1)
+                for header_area_row in range(start_row, row + 1)
             ]
-            values.extend(_read_column_body(worksheet, row + 1, source))
+            values.extend(_read_column_body(worksheet, row + 1, source, max_row=end_row))
             columns.append(values)
 
-        return BorderTable(
-            workbook=workbook,
-            sheet=sheet,
-            start_row=table.start_row,
-            start_column=table.start_column,
-            columns=columns,
-            header_rows=header_rows,
-            header_columns=len(header_values),
-            source_columns=list(selected),
-            partial=True,
-            detected_end_row=table.end_row,
-            detected_end_column=table.end_column,
-        )
+        try:
+            return BorderTable(
+                workbook=workbook,
+                sheet=sheet,
+                start_row=start_row,
+                start_column=start_column,
+                columns=columns,
+                header_rows=header_rows,
+                header_columns=len(header_values),
+                source_columns=list(selected),
+                partial=True,
+                detected_end_row=end_row,
+                detected_end_column=end_column,
+            )
+        except BorderTableShapeError:
+            continue  # malformed candidate; keep searching
 
     raise BorderTableNotFoundError(
-        "A bordered table matching the requested column headers was not found."
+        "A table matching the requested column headers was not found."
     )
 
 
@@ -724,12 +728,16 @@ def _read_column_body(
     worksheet: Worksheet,
     start_row: int,
     column: int,
+    *,
+    max_row: int | None = None,
 ) -> list[CellValue]:
     """Read a column downward while value/top-border/bottom-border continues."""
 
+    if max_row is None:
+        max_row = worksheet.max_row
     values: list[CellValue] = []
     row = start_row
-    while row <= worksheet.max_row:
+    while row <= max_row:
         value = worksheet.cell(row=row, column=column).value
         if (
             value is not None
@@ -772,42 +780,6 @@ def _header_contains(value: CellValue, text: str, *, match_case: bool) -> bool:
     return needle in haystack
 
 
-def _iter_candidate_tables(
-    workbook: ExcelWorkbook,
-    worksheet: Worksheet,
-    sheet: str | None,
-    anchors: Iterator[tuple[int, int]],
-    *,
-    header_row: int,
-    header_columns: int,
-    require_inner_borders: bool,
-):
-    """Yield ``(row, column, table)`` for anchors that sit on a table's header row.
-
-    Anchors that do not belong to a detectable bordered table, or whose row is
-    not the ``header_row``-th row of the detected table, are skipped so the
-    search can continue with the next candidate.
-    """
-
-    for row, column in anchors:
-        try:
-            table = detect_bordered_table(
-                workbook,
-                worksheet,
-                sheet,
-                row,
-                column,
-                header_rows=header_row,
-                header_columns=header_columns,
-                require_inner_borders=require_inner_borders,
-            )
-        except (BorderTableNotFoundError, BorderTableShapeError):
-            continue
-        if row - table.start_row + 1 != header_row:
-            continue
-        yield row, column, table
-
-
 def _iter_sequence_anchor_cells(
     worksheet: Worksheet,
     header_values: list[CellValue],
@@ -839,164 +811,12 @@ def _iter_value_anchor_cells(
                 yield row, column
 
 
-def _walk_inner_bounds(
-    worksheet: Worksheet,
-    row: int,
-    column: int,
-) -> tuple[int, int, int, int]:
-    """Find table bounds by following continuous inner gridlines."""
-
-    start_row = end_row = row
-    start_column = end_column = column
-
-    while (
-        start_row > 1
-        and _has_horizontal_boundary(worksheet, start_row - 1, column)
-        and _cell_has_any_border(worksheet, start_row - 1, column)
-    ):
-        start_row -= 1
-    while (
-        end_row < worksheet.max_row
-        and _has_horizontal_boundary(worksheet, end_row, column)
-        and _cell_has_any_border(worksheet, end_row + 1, column)
-    ):
-        end_row += 1
-    while (
-        start_column > 1
-        and _has_vertical_boundary(worksheet, row, start_column - 1)
-        and _cell_has_any_border(worksheet, row, start_column - 1)
-    ):
-        start_column -= 1
-    while (
-        end_column < worksheet.max_column
-        and _has_vertical_boundary(worksheet, row, end_column)
-        and _cell_has_any_border(worksheet, row, end_column + 1)
-    ):
-        end_column += 1
-
-    return start_row, start_column, end_row, end_column
-
-
-def _flood_outer_bounds(
-    worksheet: Worksheet,
-    row: int,
-    column: int,
-) -> tuple[int, int, int, int]:
-    """Find table bounds as the bounding box of connected bordered cells.
-
-    Movement spreads to neighbouring cells that carry any border, so missing
-    inner gridlines do not stop the spread; the outer frame (whose perimeter
-    cells are all bordered) closes the region, and cells outside the frame have
-    no borders and are excluded.
-    """
-
-    max_row = worksheet.max_row
-    max_column = worksheet.max_column
-    start_row = end_row = row
-    start_column = end_column = column
-
-    seen = {(row, column)}
-    stack = [(row, column)]
-    while stack:
-        current_row, current_column = stack.pop()
-        start_row = min(start_row, current_row)
-        end_row = max(end_row, current_row)
-        start_column = min(start_column, current_column)
-        end_column = max(end_column, current_column)
-        for next_row, next_column in (
-            (current_row - 1, current_column),
-            (current_row + 1, current_column),
-            (current_row, current_column - 1),
-            (current_row, current_column + 1),
-        ):
-            if not (1 <= next_row <= max_row and 1 <= next_column <= max_column):
-                continue
-            if (next_row, next_column) in seen:
-                continue
-            if not _cell_has_any_border(worksheet, next_row, next_column):
-                continue
-            seen.add((next_row, next_column))
-            stack.append((next_row, next_column))
-
-    return start_row, start_column, end_row, end_column
-
-
-def _validate_bordered_rectangle(
-    worksheet: Worksheet,
-    start_row: int,
-    start_column: int,
-    end_row: int,
-    end_column: int,
-    *,
-    inner: bool = True,
-) -> None:
-    for row in range(start_row, end_row + 1):
-        for column in range(start_column, end_column + 1):
-            _reject_merged_cell(worksheet, row, column)
-
-    for column in range(start_column, end_column + 1):
-        if not _has_top_border(worksheet, start_row, column):
-            raise BorderTableShapeError("table top border is incomplete.")
-        if not _has_bottom_border(worksheet, end_row, column):
-            raise BorderTableShapeError("table bottom border is incomplete.")
-
-    for row in range(start_row, end_row + 1):
-        if not _has_left_border(worksheet, row, start_column):
-            raise BorderTableShapeError("table left border is incomplete.")
-        if not _has_right_border(worksheet, row, end_column):
-            raise BorderTableShapeError("table right border is incomplete.")
-
-    if not inner:
-        return
-
-    for row in range(start_row, end_row):
-        for column in range(start_column, end_column + 1):
-            if not _has_horizontal_boundary(worksheet, row, column):
-                raise BorderTableShapeError("table has a missing internal horizontal border.")
-
-    for column in range(start_column, end_column):
-        for row in range(start_row, end_row + 1):
-            if not _has_vertical_boundary(worksheet, row, column):
-                raise BorderTableShapeError("table has a missing internal vertical border.")
-
-
-def _reject_merged_cell(worksheet: Worksheet, row: int, column: int) -> None:
-    cell_ref = _cell_address(row, column)
-    for merged_range in worksheet.merged_cells.ranges:
-        if cell_ref in merged_range:
-            raise BorderTableShapeError("merged cells are not supported in bordered tables.")
-
-
-def _has_vertical_boundary(worksheet: Worksheet, row: int, left_column: int) -> bool:
-    return _has_right_border(worksheet, row, left_column) or _has_left_border(
-        worksheet,
-        row,
-        left_column + 1,
-    )
-
-
-def _has_horizontal_boundary(worksheet: Worksheet, top_row: int, column: int) -> bool:
-    return _has_bottom_border(worksheet, top_row, column) or _has_top_border(
-        worksheet,
-        top_row + 1,
-        column,
-    )
-
-
 def _has_top_border(worksheet: Worksheet, row: int, column: int) -> bool:
     return _has_side(worksheet.cell(row=row, column=column).border.top)
 
 
 def _has_bottom_border(worksheet: Worksheet, row: int, column: int) -> bool:
     return _has_side(worksheet.cell(row=row, column=column).border.bottom)
-
-
-def _has_left_border(worksheet: Worksheet, row: int, column: int) -> bool:
-    return _has_side(worksheet.cell(row=row, column=column).border.left)
-
-
-def _has_right_border(worksheet: Worksheet, row: int, column: int) -> bool:
-    return _has_side(worksheet.cell(row=row, column=column).border.right)
 
 
 def _has_side(side: object) -> bool:

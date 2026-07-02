@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Border, Side
 
 from openpyxlwings import BorderTable, ExcelWorkbook, WritePlan
@@ -177,20 +177,63 @@ def test_partial_requires_detected_bounds() -> None:
 
 
 def test_decoy_first_header_on_same_row_is_skipped(tmp_path: Path) -> None:
-    # A borderless cell with the same text sits in the same row, left of the
-    # real table's header; the search must move on to the next candidate cell
-    # instead of skipping the whole row.
+    # A lone cell with the same text sits in the same row, separated from the
+    # real table by an empty column; the search must move on to the next
+    # candidate cell instead of stopping at the decoy.
     path = tmp_path / "book.xlsx"
-    make_amount_workbook(path)
-    book = load_workbook(path)
-    book["Amount"].cell(row=2, column=1).value = "header1"
-    book.save(path)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Amount"
+    sheet.cell(row=2, column=2).value = "header1"  # decoy, no table below
+    values = [
+        ["header1", "amount"],
+        ["col1a", 100],
+        ["col2a", 300],
+        ["col3a", 500],
+    ]
+    for row_offset, row in enumerate(values, start=2):
+        for column_offset, value in enumerate(row, start=4):  # columns D..E
+            cell = sheet.cell(row=row_offset, column=column_offset)
+            cell.value = value
+            cell.border = FULL
+    workbook.save(path)
 
     with ExcelWorkbook(path) as workbook:
         table = workbook.get_bordered_table("Amount", header_values=["header1"], columns="selected")
 
+    assert table.source_columns == [4]
     assert [column[0] for column in table.columns] == ["header1"]
     assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
+
+
+def test_selected_columns_read_borderless_values(tmp_path: Path) -> None:
+    # Column selection no longer needs any borders; the body of each column
+    # is read while values continue.
+    path = tmp_path / "plain.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Plain"
+    values = [
+        ["header1", "header2", "amount"],
+        ["col1a", "col1b", 100],
+        ["col2a", "col2b", 300],
+    ]
+    for row_offset, row in enumerate(values, start=2):
+        for column_offset, value in enumerate(row, start=2):
+            sheet.cell(row=row_offset, column=column_offset).value = value
+    workbook.save(path)
+
+    with ExcelWorkbook(path) as book:
+        table = book.get_bordered_table(
+            "Plain",
+            header_values=["header1"],
+            value_header_contains="amount",
+            columns="selected",
+        )
+
+    assert table.source_columns == [2, 4]
+    assert table.row_headers == [["col1a"], ["col2a"]]
+    assert table.data == [[100, 300]]
 
 
 def test_missing_header_raises(tmp_path: Path) -> None:
