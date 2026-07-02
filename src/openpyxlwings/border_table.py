@@ -65,10 +65,9 @@ class BorderTable:
 
     @property
     def data(self) -> Table:
-        return [
-            [column[row] for column in self.columns[self.header_columns :]]
-            for row in range(self.header_rows, self.row_count)
-        ]
+        """The body area as a list of columns (column-major)."""
+
+        return [column[self.header_rows :] for column in self.columns[self.header_columns :]]
 
     @property
     def row_headers(self) -> Table:

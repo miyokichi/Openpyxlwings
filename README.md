@@ -586,6 +586,8 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 `header_rows` は列見出しの行数、`header_columns` は行見出しの列数です。
 どちらも複数指定できます。
 
+`table.data` は見出しを除いた本体を **列ごとのリスト**（列方向優先）で返します。
+
 ### 内側の罫線が欠けている表を読む
 
 既定では、表の内側のすべての格子線がそろっていることを要求します。
@@ -745,7 +747,7 @@ with ExcelWorkbook("report.xlsx") as book:
     )
 
     print(table.column_headers)   # ['header1', 'amount', 'amount']（header2 は含まれない）
-    print(table.data)             # [['header_col1', 100, 200], ...]
+    print(table.data)             # [['header_col1', ...], [100, ...], [200, ...]]（列ごとのリスト）
 
     # 仮想テーブルとして編集できる
     table.add_row(["header_col4", 700, 800])

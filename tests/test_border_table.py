@@ -74,7 +74,7 @@ def test_get_bordered_table_detects_range_and_headers(tmp_path: Path) -> None:
     ]
     assert table.column_headers == [["2026", "2027"], ["Sales", "Sales"]]
     assert table.row_headers == [["East"], ["West"]]
-    assert table.data == [[10, 20], [30, 40]]
+    assert table.data == [[10, 30], [20, 40]]
 
 
 def test_get_bordered_table_by_header_detects_variable_amount_columns(tmp_path: Path) -> None:
@@ -97,7 +97,7 @@ def test_get_bordered_table_by_header_detects_variable_amount_columns(tmp_path: 
         ["header_col2", "header2_col2"],
         ["header_col3", "header2_col3"],
     ]
-    assert table.data == [[100, 200], [300, 400], [500, 600]]
+    assert table.data == [[100, 300, 500], [200, 400, 600]]
 
 
 def test_get_bordered_table_by_header_is_case_insensitive(tmp_path: Path) -> None:
@@ -150,7 +150,7 @@ def test_border_table_sets_body_row_by_single_row_header(tmp_path: Path) -> None
 
     table.set_body_row_by_header("East", [11, 22])
 
-    assert table.data == [[11, 22], [30, 40]]
+    assert table.data == [[11, 30], [22, 40]]
 
 
 def test_border_table_sets_body_row_by_multi_column_row_header() -> None:
@@ -173,7 +173,7 @@ def test_border_table_sets_body_row_by_multi_column_row_header() -> None:
 
     table.set_body_row_by_header(("East", "Enterprise"), [25, 10])
 
-    assert table.data == [[10, 3], [25, 10], [30, 9]]
+    assert table.data == [[10, 25, 30], [3, 10, 9]]
 
 
 def test_border_table_rejects_bad_shapes(tmp_path: Path) -> None:

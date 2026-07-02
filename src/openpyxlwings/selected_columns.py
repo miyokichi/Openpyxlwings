@@ -80,12 +80,9 @@ class SelectedColumnsTable:
 
     @property
     def data(self) -> list[list[CellValue]]:
-        """The selected columns as a rectangular, None-padded grid of rows."""
+        """The selected columns as a rectangular, None-padded list of columns."""
 
-        return [
-            [column.values[row] for column in self.columns]
-            for row in range(self.row_count)
-        ]
+        return [list(column.values) for column in self.columns]
 
     @property
     def row_headers(self) -> list[list[CellValue]]:

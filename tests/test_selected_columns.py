@@ -46,7 +46,7 @@ def test_selects_only_requested_header_column(tmp_path: Path) -> None:
         table = workbook.get_bordered_table_by_columns("Amount", ["header1"])
 
     assert table.column_headers == ["header1"]
-    assert table.data == [["col1a"], ["col2a"], ["col3a"]]
+    assert table.data == [["col1a", "col2a", "col3a"]]
     assert table.row_count == 3
 
 
@@ -64,9 +64,9 @@ def test_value_header_contains_selects_every_amount_column(tmp_path: Path) -> No
     # header2 is not requested, so it is excluded; both amount columns appear.
     assert table.column_headers == ["header1", "amount", "amount"]
     assert table.data == [
-        ["col1a", 100, 200],
-        ["col2a", 300, 400],
-        ["col3a", 500, 600],
+        ["col1a", "col2a", "col3a"],
+        [100, 300, 500],
+        [200, 400, 600],
     ]
     # Each selected column remembers its source Excel column (B, C, D).
     assert [column.source_column for column in table.columns] == [2, 4, 5]
@@ -92,7 +92,7 @@ def test_continuation_includes_bordered_empty_cell(tmp_path: Path) -> None:
             value_header_contains="amount",
         )
 
-    assert table.data == [["a", 100], ["b", None], ["c", 300]]
+    assert table.data == [["a", "b", "c"], [100, None, 300]]
 
 
 def test_ragged_columns_are_padded_with_none() -> None:
@@ -112,7 +112,7 @@ def test_ragged_columns_are_padded_with_none() -> None:
     )
 
     assert table.row_count == 3
-    assert table.data == [["a", 100], ["b", None], ["c", None]]
+    assert table.data == [["a", "b", "c"], [100, None, None]]
 
 
 def test_missing_header_raises(tmp_path: Path) -> None:
@@ -138,12 +138,12 @@ def test_add_row_and_add_column_update_virtual_table(tmp_path: Path) -> None:
     table.add_row(["col4a", 700, 800])
     assert table.row_count == 4
     assert table.added_rows == 1
-    assert table.data[-1] == ["col4a", 700, 800]
+    assert [column[-1] for column in table.data] == ["col4a", 700, 800]
 
     table.add_column([1, 2, 3, 4], header="ratio")
     assert table.column_headers == ["header1", "amount", "amount", "ratio"]
     assert table.columns[-1].source_column is None
-    assert table.data[0] == ["col1a", 100, 200, 1]
+    assert [column[0] for column in table.data] == ["col1a", 100, 200, 1]
 
 
 def test_find_body_row_and_set_body_row_by_header(tmp_path: Path) -> None:
@@ -163,9 +163,9 @@ def test_find_body_row_and_set_body_row_by_header(tmp_path: Path) -> None:
     table.set_body_row_by_header("col1a", [111, 222])
 
     assert table.data == [
-        ["col1a", 111, 222],
-        ["col2a", 300, 400],
-        ["col3a", 500, 600],
+        ["col1a", "col2a", "col3a"],
+        [111, 300, 500],
+        [222, 400, 600],
     ]
 
 
@@ -191,9 +191,9 @@ def test_find_body_row_with_multi_column_row_header() -> None:
     table.set_body_row_by_header(("col1a", "col1b"), [999])
 
     assert table.data == [
-        ["col1a", "col1b", 999],
-        ["col2a", "col2b", 300],
-        ["col3a", "col3b", 500],
+        ["col1a", "col2a", "col3a"],
+        ["col1b", "col2b", "col3b"],
+        [999, 300, 500],
     ]
 
 
