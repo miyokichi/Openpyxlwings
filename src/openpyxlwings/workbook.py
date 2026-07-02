@@ -14,14 +14,11 @@ from openpyxl.worksheet.worksheet import Worksheet
 from openpyxlwings.border_table import (
     BorderTable,
     detect_bordered_table,
+    detect_bordered_table_by_columns,
     detect_bordered_table_by_header,
 )
 from openpyxlwings.exceptions import ExcelWriteError, SheetNotFoundError
 from openpyxlwings.format import ExtractedMatch, TablePattern, extract_pattern
-from openpyxlwings.selected_columns import (
-    SelectedColumnsTable,
-    detect_selected_columns_table,
-)
 
 if TYPE_CHECKING:
     from openpyxlwings.plan import WritePlan
@@ -292,18 +289,18 @@ class ExcelWorkbook:
         header_row: int = 1,
         match_case: bool = False,
         require_inner_borders: bool = True,
-    ) -> SelectedColumnsTable:
-        """Detect a bordered table and select only a subset of its columns.
+    ) -> BorderTable:
+        """Detect a bordered table and hold only a subset of its columns.
 
         ``header_values`` (exact match, order preserved) and the optional
         ``value_header_contains`` (substring match, every matching column)
-        choose which columns are read into an editable virtual table. Each
+        choose which columns are read into an editable partial table. Each
         selected column is read top-down while a cell has a value, a top
         border, or a bottom border.
         """
 
         worksheet = self._reader.styled_sheet(sheet)
-        return detect_selected_columns_table(
+        return detect_bordered_table_by_columns(
             self,
             worksheet,
             sheet,
@@ -328,10 +325,6 @@ class ExcelWorkbook:
     def _save_bordered_table(self, table: BorderTable) -> None:
         self._reader.close()
         self._writer.save_bordered_table(table)
-
-    def _save_selected_columns_table(self, table: SelectedColumnsTable) -> None:
-        self._reader.close()
-        self._writer.save_selected_columns_table(table)
 
 
 class _OpenpyxlReadSession:
@@ -618,26 +611,42 @@ class _XlwingsWriteSession:
     def save_bordered_table(self, table: BorderTable) -> None:
         self.apply_bordered_table(
             table.sheet,
-            table.start_row,
-            table.start_column,
-            _rows_from_columns(table.columns),
-            table.end_row,
-            table.end_column,
-            [(insertion.axis, insertion.index) for insertion in table._insertions],
+            partial=table.partial,
+            start_row=table.start_row,
+            start_column=table.start_column,
+            header_rows=table.header_rows,
+            columns=[
+                (source, list(column))
+                for source, column in zip(table.source_columns, table.columns, strict=True)
+            ],
+            end_row=table.end_row,
+            end_column=table.end_column,
+            insertions=[(insertion.axis, insertion.index) for insertion in table._insertions],
         )
         self.save()
 
     def apply_bordered_table(
         self,
         sheet: str | None,
+        *,
+        partial: bool,
         start_row: int,
         start_column: int,
-        values: Table,
+        header_rows: int,
+        columns: Sequence[tuple[int | None, list[CellValue]]],
         end_row: int,
         end_column: int,
         insertions: Sequence[tuple[str, int]],
     ) -> None:
-        """Write an edited bordered table back without saving the workbook."""
+        """Write an edited bordered table back without saving the workbook.
+
+        ``columns`` holds ``(source_column, values)`` pairs, column-major and
+        header rows included. A full table is rewritten as one rectangle. For
+        a partial table only the held columns are written: sourced columns go
+        back to their Excel columns starting at the header row, and columns
+        without a source are inserted at the table's right edge. In both cases
+        the final rectangle's borders are redrawn.
+        """
 
         for axis, index in insertions:
             if axis == "row":
@@ -645,76 +654,35 @@ class _XlwingsWriteSession:
             else:
                 self.insert_column(sheet, index)
 
-        self.write_values_at(sheet, start_row, start_column, values)
-        self.apply_table_borders(sheet, start_row, start_column, end_row, end_column)
-
-    def save_selected_columns_table(self, table: SelectedColumnsTable) -> None:
-        self.apply_selected_columns_table(
-            table.sheet,
-            table.start_row,
-            table.start_column,
-            table.end_row,
-            table.end_column,
-            table.header_row,
-            table.added_rows,
-            [
-                (column.source_column, column.header, list(column.values))
-                for column in table.columns
-            ],
-        )
-        self.save()
-
-    def apply_selected_columns_table(
-        self,
-        sheet: str | None,
-        start_row: int,
-        start_column: int,
-        end_row: int,
-        end_column: int,
-        header_row: int,
-        added_rows: int,
-        columns: Sequence[tuple[int | None, CellValue, list[CellValue]]],
-    ) -> None:
-        """Write a column-selected virtual table back to Excel.
-
-        Only the selected columns are written; unselected columns are left
-        untouched. Appended rows and in-memory columns are inserted at the end
-        of the table, then the full rectangle's borders are redrawn.
-        """
-
-        body_start_row = header_row + 1
-        for _ in range(added_rows):
-            self.insert_row(sheet, end_row + 1)
-
-        added_columns = 0
-        for source_column, header, values in columns:
-            if source_column is None:
-                target_column = end_column + 1 + added_columns
-                self.insert_column(sheet, target_column)
-                added_columns += 1
-                self.write_values_at(sheet, header_row, target_column, header)
-                if values:
+        if partial:
+            header_excel_row = start_row + header_rows - 1
+            new_column_count = sum(1 for source, _ in columns if source is None)
+            added = 0
+            for source, values in columns:
+                if source is None:
+                    target_column = end_column - new_column_count + 1 + added
+                    self.insert_column(sheet, target_column)
+                    added += 1
                     self.write_values_at(
                         sheet,
-                        body_start_row,
+                        start_row,
                         target_column,
                         [[value] for value in values],
                     )
-            elif values:
-                self.write_values_at(
-                    sheet,
-                    body_start_row,
-                    source_column,
-                    [[value] for value in values],
-                )
+                else:
+                    # Skip rows above the header so cells outside the held
+                    # area (e.g. a title row) are left untouched.
+                    self.write_values_at(
+                        sheet,
+                        header_excel_row,
+                        source,
+                        [[value] for value in values[header_rows - 1 :]],
+                    )
+        else:
+            values = _rows_from_columns([column for _, column in columns])
+            self.write_values_at(sheet, start_row, start_column, values)
 
-        self.apply_table_borders(
-            sheet,
-            start_row,
-            start_column,
-            end_row + added_rows,
-            end_column + added_columns,
-        )
+        self.apply_table_borders(sheet, start_row, start_column, end_row, end_column)
 
     def insert_row(self, sheet: str | None, row: int) -> None:
         _validate_position(row, 1)

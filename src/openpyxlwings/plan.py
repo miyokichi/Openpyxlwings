@@ -16,15 +16,12 @@ from typing import TYPE_CHECKING
 from openpyxlwings.workbook import (
     CellValue,
     RangeValue,
-    Table,
     _cell_address,
     _range_address,
-    _rows_from_columns,
 )
 
 if TYPE_CHECKING:
     from openpyxlwings.border_table import BorderTable
-    from openpyxlwings.selected_columns import SelectedColumnsTable
     from openpyxlwings.workbook import _XlwingsWriteSession
 
 
@@ -51,9 +48,11 @@ class _ClearContentsOp:
 @dataclass(frozen=True)
 class _BorderedTableOp:
     sheet: str | None
+    partial: bool
     start_row: int
     start_column: int
-    values: Table
+    header_rows: int
+    columns: tuple[tuple[int | None, tuple[CellValue, ...]], ...]
     end_row: int
     end_column: int
     insertions: tuple[tuple[str, int], ...]
@@ -61,40 +60,18 @@ class _BorderedTableOp:
     def apply(self, writer: _XlwingsWriteSession) -> None:
         writer.apply_bordered_table(
             self.sheet,
-            self.start_row,
-            self.start_column,
-            self.values,
-            self.end_row,
-            self.end_column,
-            self.insertions,
+            partial=self.partial,
+            start_row=self.start_row,
+            start_column=self.start_column,
+            header_rows=self.header_rows,
+            columns=[(source, list(values)) for source, values in self.columns],
+            end_row=self.end_row,
+            end_column=self.end_column,
+            insertions=self.insertions,
         )
 
 
-@dataclass(frozen=True)
-class _SelectedColumnsTableOp:
-    sheet: str | None
-    start_row: int
-    start_column: int
-    end_row: int
-    end_column: int
-    header_row: int
-    added_rows: int
-    columns: tuple[tuple[int | None, CellValue, tuple[CellValue, ...]], ...]
-
-    def apply(self, writer: _XlwingsWriteSession) -> None:
-        writer.apply_selected_columns_table(
-            self.sheet,
-            self.start_row,
-            self.start_column,
-            self.end_row,
-            self.end_column,
-            self.header_row,
-            self.added_rows,
-            [(source, header, list(values)) for source, header, values in self.columns],
-        )
-
-
-_WriteOp = _WriteValuesOp | _ClearContentsOp | _BorderedTableOp | _SelectedColumnsTableOp
+_WriteOp = _WriteValuesOp | _ClearContentsOp | _BorderedTableOp
 
 
 class WritePlan:
@@ -163,48 +140,30 @@ class WritePlan:
     def add_bordered_table(self, table: BorderTable) -> WritePlan:
         """Queue an edited bordered table to be written back to its position.
 
-        A snapshot of the table's current values, bounds, and pending row/column
+        Full and partial (column-selected) tables are both accepted. A snapshot
+        of the table's current values, bounds, and pending row/column
         insertions is taken now, so later edits to ``table`` do not affect what
-        this plan writes. Unlike :meth:`BorderTable.save`, this neither writes to
-        Excel nor saves until :meth:`ExcelWorkbook.apply` runs.
+        this plan writes. Unlike :meth:`BorderTable.save`, this neither writes
+        to Excel nor saves until :meth:`ExcelWorkbook.apply` runs.
         """
 
         self._ops.append(
             _BorderedTableOp(
                 sheet=table.sheet,
+                partial=table.partial,
                 start_row=table.start_row,
                 start_column=table.start_column,
-                values=_rows_from_columns(table.columns),
+                header_rows=table.header_rows,
+                columns=tuple(
+                    (source, tuple(column))
+                    for source, column in zip(
+                        table.source_columns, table.columns, strict=True
+                    )
+                ),
                 end_row=table.end_row,
                 end_column=table.end_column,
                 insertions=tuple(
                     (insertion.axis, insertion.index) for insertion in table._insertions
-                ),
-            )
-        )
-        return self
-
-    def add_selected_columns_table(self, table: SelectedColumnsTable) -> WritePlan:
-        """Queue an edited column-selected virtual table to be written back.
-
-        A snapshot of the table's current columns, values, bounds, and appended
-        row count is taken now, so later edits to ``table`` do not affect what
-        this plan writes. Unlike :meth:`SelectedColumnsTable.save`, this neither
-        writes to Excel nor saves until :meth:`ExcelWorkbook.apply` runs.
-        """
-
-        self._ops.append(
-            _SelectedColumnsTableOp(
-                sheet=table.sheet,
-                start_row=table.start_row,
-                start_column=table.start_column,
-                end_row=table.end_row,
-                end_column=table.end_column,
-                header_row=table.header_row,
-                added_rows=table.added_rows,
-                columns=tuple(
-                    (column.source_column, column.header, tuple(column.values))
-                    for column in table.columns
                 ),
             )
         )

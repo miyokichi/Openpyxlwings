@@ -1,13 +1,14 @@
+"""Tests for partial (column-selected) bordered tables."""
+
 from pathlib import Path
 
 import pytest
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Border, Side
 
-from openpyxlwings import ExcelWorkbook, SelectedColumnsTable, WritePlan
+from openpyxlwings import BorderTable, ExcelWorkbook, WritePlan
 from openpyxlwings.exceptions import BorderTableNotFoundError, BorderTableShapeError
-from openpyxlwings.plan import _SelectedColumnsTableOp
-from openpyxlwings.selected_columns import _SelectedColumn
+from openpyxlwings.plan import _BorderedTableOp
 
 THIN = Side(style="thin")
 FULL = Border(top=THIN, bottom=THIN, left=THIN, right=THIN)
@@ -38,6 +39,22 @@ def make_amount_workbook(path: Path) -> None:
     )
 
 
+def make_partial_table(workbook=None) -> BorderTable:
+    return BorderTable(
+        workbook=workbook,
+        sheet="Amount",
+        start_row=2,
+        start_column=2,
+        columns=[["key", "a", "b"], ["amount", 100, 200]],
+        header_rows=1,
+        header_columns=1,
+        source_columns=[2, 3],
+        partial=True,
+        detected_end_row=4,
+        detected_end_column=3,
+    )
+
+
 def test_selects_only_requested_header_column(tmp_path: Path) -> None:
     path = tmp_path / "book.xlsx"
     make_amount_workbook(path)
@@ -45,9 +62,11 @@ def test_selects_only_requested_header_column(tmp_path: Path) -> None:
     with ExcelWorkbook(path) as workbook:
         table = workbook.get_bordered_table_by_columns("Amount", ["header1"])
 
-    assert table.column_headers == ["header1"]
-    assert table.data == [["col1a", "col2a", "col3a"]]
-    assert table.row_count == 3
+    assert table.partial is True
+    assert [column[0] for column in table.columns] == ["header1"]
+    assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
+    assert table.data == []  # every held column is a row-header column
+    assert table.row_count == 4  # header row + 3 body rows
 
 
 def test_value_header_contains_selects_every_amount_column(tmp_path: Path) -> None:
@@ -62,14 +81,11 @@ def test_value_header_contains_selects_every_amount_column(tmp_path: Path) -> No
         )
 
     # header2 is not requested, so it is excluded; both amount columns appear.
-    assert table.column_headers == ["header1", "amount", "amount"]
-    assert table.data == [
-        ["col1a", "col2a", "col3a"],
-        [100, 300, 500],
-        [200, 400, 600],
-    ]
-    # Each selected column remembers its source Excel column (B, C, D).
-    assert [column.source_column for column in table.columns] == [2, 4, 5]
+    assert table.column_headers == [["amount", "amount"]]
+    assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
+    assert table.data == [[100, 300, 500], [200, 400, 600]]
+    # Each held column remembers its source Excel column (B, C, D).
+    assert table.source_columns == [2, 4, 5]
 
 
 def test_continuation_includes_bordered_empty_cell(tmp_path: Path) -> None:
@@ -92,27 +108,69 @@ def test_continuation_includes_bordered_empty_cell(tmp_path: Path) -> None:
             value_header_contains="amount",
         )
 
-    assert table.data == [["a", "b", "c"], [100, None, 300]]
+    assert table.row_headers == [["a"], ["b"], ["c"]]
+    assert table.data == [[100, None, 300]]
+
+
+def test_header_on_second_table_row_keeps_title_row(tmp_path: Path) -> None:
+    path = tmp_path / "book.xlsx"
+    _write_grid(
+        path,
+        "Titled",
+        [
+            ["Title", None, None],
+            ["key", "amount", "note"],
+            ["a", 100, "x"],
+            ["b", 200, "y"],
+        ],
+    )
+
+    with ExcelWorkbook(path) as workbook:
+        table = workbook.get_bordered_table_by_columns(
+            "Titled",
+            ["key"],
+            value_header_contains="amount",
+            header_row=2,
+        )
+
+    assert table.header_rows == 2
+    assert table.columns == [["Title", "key", "a", "b"], [None, "amount", 100, 200]]
+    assert table.row_headers == [["a"], ["b"]]
+    assert table.data == [[100, 200]]
 
 
 def test_ragged_columns_are_padded_with_none() -> None:
     # Columns read with different lengths are squared up into a rectangle.
-    table = SelectedColumnsTable(
-        workbook=None,  # type: ignore[arg-type]
+    table = BorderTable(
+        workbook=None,
         sheet="S",
         start_row=2,
         start_column=2,
-        end_row=4,
-        end_column=3,
-        header_row=2,
-        columns=[
-            _SelectedColumn("key", 2, ["a", "b", "c"]),
-            _SelectedColumn("amount", 3, [100]),
-        ],
+        columns=[["key", "a", "b", "c"], ["amount", 100]],
+        header_rows=1,
+        header_columns=1,
+        source_columns=[2, 3],
+        partial=True,
+        detected_end_row=5,
+        detected_end_column=3,
     )
 
-    assert table.row_count == 3
-    assert table.data == [["a", "b", "c"], [100, None, None]]
+    assert table.row_count == 4
+    assert table.row_headers == [["a"], ["b"], ["c"]]
+    assert table.data == [[100, None, None]]
+
+
+def test_partial_requires_detected_bounds() -> None:
+    with pytest.raises(BorderTableShapeError, match="detected_end_row"):
+        BorderTable(
+            workbook=None,
+            sheet="S",
+            start_row=2,
+            start_column=2,
+            columns=[["key", "a"]],
+            source_columns=[2],
+            partial=True,
+        )
 
 
 def test_decoy_first_header_on_same_row_is_skipped(tmp_path: Path) -> None:
@@ -128,8 +186,8 @@ def test_decoy_first_header_on_same_row_is_skipped(tmp_path: Path) -> None:
     with ExcelWorkbook(path) as workbook:
         table = workbook.get_bordered_table_by_columns("Amount", ["header1"])
 
-    assert table.column_headers == ["header1"]
-    assert table.data == [["col1a", "col2a", "col3a"]]
+    assert [column[0] for column in table.columns] == ["header1"]
+    assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
 
 
 def test_missing_header_raises(tmp_path: Path) -> None:
@@ -141,7 +199,7 @@ def test_missing_header_raises(tmp_path: Path) -> None:
             workbook.get_bordered_table_by_columns("Amount", ["nope"])
 
 
-def test_add_row_and_add_column_update_virtual_table(tmp_path: Path) -> None:
+def test_add_row_and_add_column_update_partial_table(tmp_path: Path) -> None:
     path = tmp_path / "book.xlsx"
     make_amount_workbook(path)
 
@@ -152,15 +210,17 @@ def test_add_row_and_add_column_update_virtual_table(tmp_path: Path) -> None:
             value_header_contains="amount",
         )
 
-    table.add_row(["col4a", 700, 800])
-    assert table.row_count == 4
+    table.add_row([700, 800], row_headers=["col4a"])
+    assert table.row_count == 5
     assert table.added_rows == 1
-    assert [column[-1] for column in table.data] == ["col4a", 700, 800]
+    assert [column[-1] for column in table.columns] == ["col4a", 700, 800]
+    assert table.end_row == 6  # detected bottom (row 5) plus one appended row
 
-    table.add_column([1, 2, 3, 4], header="ratio")
-    assert table.column_headers == ["header1", "amount", "amount", "ratio"]
-    assert table.columns[-1].source_column is None
-    assert [column[0] for column in table.data] == ["col1a", 100, 200, 1]
+    table.add_column([1, 2, 3, 4], column_headers=["ratio"])
+    assert table.column_headers == [["amount", "amount", "ratio"]]
+    assert table.source_columns[-1] is None
+    assert table.added_columns == 1
+    assert [column[0] for column in table.data] == [100, 200, 1]
 
 
 def test_find_body_row_and_set_body_row_by_header(tmp_path: Path) -> None:
@@ -179,39 +239,33 @@ def test_find_body_row_and_set_body_row_by_header(tmp_path: Path) -> None:
 
     table.set_body_row_by_header("col1a", [111, 222])
 
-    assert table.data == [
-        ["col1a", "col2a", "col3a"],
-        [111, 300, 500],
-        [222, 400, 600],
-    ]
+    assert table.data == [[111, 300, 500], [222, 400, 600]]
 
 
 def test_find_body_row_with_multi_column_row_header() -> None:
-    table = SelectedColumnsTable(
-        workbook=None,  # type: ignore[arg-type]
+    table = BorderTable(
+        workbook=None,
         sheet="S",
         start_row=1,
         start_column=1,
-        end_row=4,
-        end_column=4,
-        header_row=1,
         columns=[
-            _SelectedColumn("header1", 1, ["col1a", "col2a", "col3a"]),
-            _SelectedColumn("header2", 2, ["col1b", "col2b", "col3b"]),
-            _SelectedColumn("amount", 3, [100, 300, 500]),
+            ["header1", "col1a", "col2a", "col3a"],
+            ["header2", "col1b", "col2b", "col3b"],
+            ["amount", 100, 300, 500],
         ],
+        header_rows=1,
         header_columns=2,
+        source_columns=[1, 2, 3],
+        partial=True,
+        detected_end_row=4,
+        detected_end_column=4,
     )
 
     assert table.find_body_row(["col2a", "col2b"]) == 2
 
     table.set_body_row_by_header(("col1a", "col1b"), [999])
 
-    assert table.data == [
-        ["col1a", "col2a", "col3a"],
-        ["col1b", "col2b", "col3b"],
-        [999, 300, 500],
-    ]
+    assert table.data == [[999, 300, 500]]
 
 
 def test_row_header_lookup_rejects_bad_row_header(tmp_path: Path) -> None:
@@ -236,18 +290,18 @@ def test_row_header_lookup_rejects_bad_row_header(tmp_path: Path) -> None:
 
 
 def test_row_headers_empty_without_header_columns() -> None:
-    table = SelectedColumnsTable(
-        workbook=None,  # type: ignore[arg-type]
+    table = BorderTable(
+        workbook=None,
         sheet="S",
         start_row=2,
         start_column=2,
-        end_row=4,
-        end_column=3,
-        header_row=2,
-        columns=[
-            _SelectedColumn("key", 2, ["a", "b", "c"]),
-            _SelectedColumn("amount", 3, [100, 200, 300]),
-        ],
+        columns=[["key", "a", "b", "c"], ["amount", 100, 200, 300]],
+        header_rows=1,
+        header_columns=0,
+        source_columns=[2, 3],
+        partial=True,
+        detected_end_row=5,
+        detected_end_column=3,
     )
 
     assert table.row_headers == []
@@ -266,62 +320,54 @@ def test_add_row_rejects_wrong_width(tmp_path: Path) -> None:
         table.add_row(["too", "many"])
 
 
-def test_save_delegates_to_workbook() -> None:
+def test_partial_table_rejects_header_additions() -> None:
+    table = make_partial_table()
+
+    with pytest.raises(BorderTableShapeError, match="header rows"):
+        table.add_header_row(["x", "y"])
+    with pytest.raises(BorderTableShapeError, match="header columns"):
+        table.add_header_column(["x", "y", "z"])
+
+
+def test_save_delegates_to_workbook_and_rebaselines() -> None:
     class FakeWorkbook:
         def __init__(self) -> None:
             self.saved_table = None
 
-        def _save_selected_columns_table(self, table: SelectedColumnsTable) -> None:
+        def _save_bordered_table(self, table: BorderTable) -> None:
             self.saved_table = table
 
     workbook = FakeWorkbook()
-    table = SelectedColumnsTable(
-        workbook=workbook,  # type: ignore[arg-type]
-        sheet="Amount",
-        start_row=2,
-        start_column=2,
-        end_row=4,
-        end_column=3,
-        header_row=2,
-        columns=[
-            _SelectedColumn("key", 2, ["a", "b"]),
-            _SelectedColumn("amount", 3, [100, 200]),
-        ],
-    )
-    table.add_row(["c", 300])
+    table = make_partial_table(workbook)
+    table.add_row([300], row_headers=["c"])
+    table.add_column([9, 9, 9], column_headers=["extra"])
     table.save()
 
     assert workbook.saved_table is table
     assert table.added_rows == 0  # save() rebaselines the original row count
+    assert table.added_columns == 0  # the appended column now has a source
+    assert table.detected_end_row == 5
+    assert table.source_columns == [2, 3, 4]
+    assert table.detected_end_column == 4
+    assert table._insertions == []
 
 
-def test_write_plan_snapshots_selected_columns_table() -> None:
-    table = SelectedColumnsTable(
-        workbook=None,  # type: ignore[arg-type]
-        sheet="Amount",
-        start_row=2,
-        start_column=2,
-        end_row=4,
-        end_column=3,
-        header_row=2,
-        columns=[
-            _SelectedColumn("key", 2, ["a", "b"]),
-            _SelectedColumn("amount", 3, [100, 200]),
-        ],
-    )
+def test_write_plan_snapshots_partial_table() -> None:
+    table = make_partial_table()
 
     plan = WritePlan()
-    plan.add_selected_columns_table(table)
+    plan.add_bordered_table(table)
 
     # Mutating the table afterwards must not change the queued operation.
-    table.add_row(["c", 300])
-    table.add_column([9, 9, 9], header="extra")
+    table.add_row([300], row_headers=["c"])
+    table.add_column([9, 9, 9], column_headers=["extra"])
 
     assert len(plan) == 1
     op = next(iter(plan))
-    assert isinstance(op, _SelectedColumnsTableOp)
-    assert op.added_rows == 0
+    assert isinstance(op, _BorderedTableOp)
+    assert op.partial is True
+    assert op.insertions == ()
     assert op.columns == (
-        (2, "key", ("a", "b")),
-        (3, "amount", (100, 200)),
+        (2, ("key", "a", "b")),
+        (3, ("amount", 100, 200)),
     )

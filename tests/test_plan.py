@@ -37,15 +37,27 @@ class RecordingWriter:
         self.calls.append(("clear_contents", sheet, address))
 
     def apply_bordered_table(
-        self, sheet, start_row, start_column, values, end_row, end_column, insertions
+        self,
+        sheet,
+        *,
+        partial,
+        start_row,
+        start_column,
+        header_rows,
+        columns,
+        end_row,
+        end_column,
+        insertions,
     ) -> None:
         self.calls.append(
             (
                 "apply_bordered_table",
                 sheet,
+                partial,
                 start_row,
                 start_column,
-                values,
+                header_rows,
+                [(source, list(values)) for source, values in columns],
                 end_row,
                 end_column,
                 tuple(insertions),
@@ -200,9 +212,10 @@ def test_add_bordered_table_snapshots_current_state() -> None:
 
     op = list(plan)[0]
     assert op.sheet == "Report"
+    assert op.partial is False
     assert op.start_row == 2
     assert op.start_column == 1
-    assert op.values == [["h", "amount"], ["row1", 100], ["row2", 200]]
+    assert op.columns == ((1, ("h", "row1", "row2")), (2, ("amount", 100, 200)))
     assert op.end_row == 4
     assert op.end_column == 2
     assert op.insertions == (("row", 4),)
@@ -225,9 +238,11 @@ def test_apply_dispatches_bordered_table(tmp_path: Path) -> None:
         (
             "apply_bordered_table",
             "Report",
+            False,
             2,
             1,
-            [["h", "amount"], ["row1", 100], ["row2", 200]],
+            1,
+            [(1, ["h", "row1", "row2"]), (2, ["amount", 100, 200])],
             4,
             2,
             (("row", 4),),

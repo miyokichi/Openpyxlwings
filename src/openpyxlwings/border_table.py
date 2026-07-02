@@ -26,7 +26,21 @@ class _Insertion:
 
 @dataclass
 class BorderTable:
-    """Editable model for a plain Excel range divided by borders."""
+    """Editable model for a plain Excel range divided by borders.
+
+    The table holds either the full rectangle of a bordered range
+    (``partial=False``) or a subset of its columns selected by header
+    (``partial=True``). Values are stored column-major: ``columns[i]`` is the
+    i-th held column read from the table's first row down, header rows
+    included. ``source_columns[i]`` is the Excel column the values came from,
+    or ``None`` for a column added in memory that has no Excel origin yet.
+
+    Saving a full table rewrites the whole rectangle (replaying row/column
+    insertions at their recorded positions). Saving a partial table writes
+    only the held columns back to their source columns; rows added in memory
+    are inserted into the sheet, while added columns are appended to the right
+    edge of the original table regardless of their virtual position.
+    """
 
     workbook: ExcelWorkbook
     sheet: str | None
@@ -35,11 +49,25 @@ class BorderTable:
     columns: Table
     header_rows: int = 1
     header_columns: int = 0
+    source_columns: list[int | None] | None = None
+    partial: bool = False
+    detected_end_row: int | None = None
+    detected_end_column: int | None = None
     _original_rows: int = field(init=False, repr=False)
     _original_columns: int = field(init=False, repr=False)
     _insertions: list[_Insertion] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.source_columns is None:
+            self.source_columns = list(
+                range(self.start_column, self.start_column + len(self.columns))
+            )
+        if self.partial:
+            if self.detected_end_row is None or self.detected_end_column is None:
+                raise BorderTableShapeError(
+                    "partial tables require detected_end_row and detected_end_column."
+                )
+            self._pad_columns()
         self._validate_shape()
         self._original_rows = self.row_count
         self._original_columns = self.column_count
@@ -53,11 +81,23 @@ class BorderTable:
         return len(self.columns)
 
     @property
+    def added_rows(self) -> int:
+        return max(0, self.row_count - self._original_rows)
+
+    @property
+    def added_columns(self) -> int:
+        return sum(1 for source in self.source_columns if source is None)
+
+    @property
     def end_row(self) -> int:
+        if self.partial:
+            return self.detected_end_row + self.added_rows
         return self.start_row + self.row_count - 1
 
     @property
     def end_column(self) -> int:
+        if self.partial:
+            return self.detected_end_column + self.added_columns
         return self.start_column + self.column_count - 1
 
     @property
@@ -152,11 +192,19 @@ class BorderTable:
         if len(headers) != self.header_columns:
             raise BorderTableShapeError("row_headers length does not match header_columns.")
 
+        appending = insert_body_index == body_rows + 1
         table_row_index = self.header_rows + insert_body_index - 1
         full_row = headers + list(values)
         for column, value in zip(self.columns, full_row, strict=True):
             column.insert(table_row_index, value)
-        self._insertions.append(_Insertion("row", self.start_row + table_row_index))
+        if self.partial and appending:
+            # The held grid can be shorter than the detected table, so appended
+            # rows go below the original table, past rows inserted earlier.
+            prior_rows = sum(1 for insertion in self._insertions if insertion.axis == "row")
+            excel_row = self.detected_end_row + 1 + prior_rows
+        else:
+            excel_row = self.start_row + table_row_index
+        self._insertions.append(_Insertion("row", excel_row))
 
     def add_column(
         self,
@@ -182,7 +230,13 @@ class BorderTable:
         table_column_index = self.header_columns + insert_body_index - 1
         new_column = headers + list(values)
         self.columns.insert(table_column_index, new_column)
-        self._insertions.append(_Insertion("column", self.start_column + table_column_index))
+        self.source_columns.insert(table_column_index, None)
+        if not self.partial:
+            # Partial tables append new columns to the table's right edge on
+            # save; the virtual position only affects in-memory ordering.
+            self._insertions.append(
+                _Insertion("column", self.start_column + table_column_index)
+            )
 
     def add_header_row(
         self,
@@ -192,6 +246,8 @@ class BorderTable:
     ) -> None:
         """Add a column-header row. ``position`` is 1-based inside headers."""
 
+        if self.partial:
+            raise BorderTableShapeError("header rows cannot be added to a partial table.")
         insert_index = self.header_rows + 1 if position is None else position
         if insert_index < 1 or insert_index > self.header_rows + 1:
             raise BorderTableShapeError("header row position is outside the header range.")
@@ -212,6 +268,8 @@ class BorderTable:
     ) -> None:
         """Add a row-header column. ``position`` is 1-based inside headers."""
 
+        if self.partial:
+            raise BorderTableShapeError("header columns cannot be added to a partial table.")
         insert_index = self.header_columns + 1 if position is None else position
         if insert_index < 1 or insert_index > self.header_columns + 1:
             raise BorderTableShapeError("header column position is outside the header range.")
@@ -220,6 +278,7 @@ class BorderTable:
 
         table_column_index = insert_index - 1
         self.columns.insert(table_column_index, list(values))
+        self.source_columns.insert(table_column_index, None)
         self.header_columns += 1
         self._insertions.append(_Insertion("column", self.start_column + table_column_index))
 
@@ -227,23 +286,46 @@ class BorderTable:
         """Write the edited table back to its original workbook position."""
 
         self.workbook._save_bordered_table(self)
+        if self.partial:
+            # Rebaseline so a second save does not re-insert the same rows and
+            # columns: appended columns now exist at the table's right edge.
+            self.detected_end_row += self.added_rows
+            next_column = self.detected_end_column
+            for index, source in enumerate(self.source_columns):
+                if source is None:
+                    next_column += 1
+                    self.source_columns[index] = next_column
+            self.detected_end_column = next_column
         self._original_rows = self.row_count
         self._original_columns = self.column_count
         self._insertions.clear()
+
+    def _pad_columns(self) -> None:
+        height = max((len(column) for column in self.columns), default=0)
+        for column in self.columns:
+            if len(column) < height:
+                column.extend([None] * (height - len(column)))
 
     def _validate_shape(self) -> None:
         if not self.columns:
             raise BorderTableShapeError("table values cannot be empty.")
         height = len(self.columns[0])
         if height == 0:
-            raise BorderTableShapeError("table width cannot be zero.")
+            raise BorderTableShapeError("table height cannot be zero.")
         if any(len(column) != height for column in self.columns):
             raise BorderTableShapeError("table values must be rectangular.")
+        if len(self.source_columns) != len(self.columns):
+            raise BorderTableShapeError("source_columns length does not match columns.")
         if self.header_rows < 0 or self.header_columns < 0:
             raise BorderTableShapeError("header counts cannot be negative.")
         if self.header_rows >= height:
             raise BorderTableShapeError("header_rows must leave at least one body row.")
-        if self.header_columns >= len(self.columns):
+        if self.partial:
+            if self.header_columns > len(self.columns):
+                raise BorderTableShapeError(
+                    "header_columns cannot exceed the number of held columns."
+                )
+        elif self.header_columns >= len(self.columns):
             raise BorderTableShapeError("header_columns must leave at least one body column.")
 
     def _validate_table_position(self, row: int, column: int) -> None:
@@ -382,6 +464,182 @@ def detect_bordered_table_by_header(
         return table
 
     raise BorderTableNotFoundError("A bordered table matching the header values was not found.")
+
+
+def detect_bordered_table_by_columns(
+    workbook: ExcelWorkbook,
+    worksheet: Worksheet,
+    sheet: str | None,
+    header_values: list[CellValue],
+    *,
+    value_header_contains: str | None = None,
+    header_row: int = 1,
+    match_case: bool = False,
+    require_inner_borders: bool = True,
+) -> BorderTable:
+    """Detect a bordered table and hold only a subset of its columns.
+
+    ``header_values`` are matched exactly (order preserved) anywhere on the
+    table's header row. When ``value_header_contains`` is given, every header
+    cell that contains the text is also selected (left to right). Each
+    selected column is read from the table's first row down; below the header
+    the read continues while a cell has a value, a top border, or a bottom
+    border, and ragged columns are squared up with ``None``.
+    """
+
+    if not header_values:
+        raise BorderTableShapeError("header_values must contain at least one value.")
+    if header_row < 1:
+        raise BorderTableShapeError("header_row must be 1 or greater.")
+
+    anchors = _iter_value_anchor_cells(worksheet, header_values[0], match_case=match_case)
+    for row, _anchor_column, table in _iter_candidate_tables(
+        workbook,
+        worksheet,
+        sheet,
+        anchors,
+        header_row=header_row,
+        header_columns=0,
+        require_inner_borders=require_inner_borders,
+    ):
+        selected = _select_source_columns(
+            worksheet,
+            row,
+            table.start_column,
+            table.end_column,
+            header_values,
+            value_header_contains,
+            match_case=match_case,
+        )
+        if selected is None:
+            continue
+
+        columns = []
+        for source in selected:
+            values = [
+                worksheet.cell(row=header_area_row, column=source).value
+                for header_area_row in range(table.start_row, row + 1)
+            ]
+            values.extend(_read_column_body(worksheet, row + 1, source))
+            columns.append(values)
+
+        return BorderTable(
+            workbook=workbook,
+            sheet=sheet,
+            start_row=table.start_row,
+            start_column=table.start_column,
+            columns=columns,
+            header_rows=header_row,
+            header_columns=len(header_values),
+            source_columns=list(selected),
+            partial=True,
+            detected_end_row=table.end_row,
+            detected_end_column=table.end_column,
+        )
+
+    raise BorderTableNotFoundError(
+        "A bordered table matching the requested column headers was not found."
+    )
+
+
+def _select_source_columns(
+    worksheet: Worksheet,
+    header_row: int,
+    start_column: int,
+    end_column: int,
+    header_values: list[CellValue],
+    value_header_contains: str | None,
+    *,
+    match_case: bool,
+) -> list[int] | None:
+    """Resolve the Excel columns selected by exact and substring header match."""
+
+    used: set[int] = set()
+    selected: list[int] = []
+
+    for header_value in header_values:
+        column = _find_header_column(
+            worksheet,
+            header_row,
+            start_column,
+            end_column,
+            header_value,
+            match_case=match_case,
+            skip=used,
+        )
+        if column is None:
+            return None
+        used.add(column)
+        selected.append(column)
+
+    if value_header_contains:
+        value_columns = [
+            column
+            for column in range(start_column, end_column + 1)
+            if column not in used
+            and _header_contains(
+                worksheet.cell(row=header_row, column=column).value,
+                value_header_contains,
+                match_case=match_case,
+            )
+        ]
+        if not value_columns:
+            return None
+        selected.extend(value_columns)
+
+    return selected
+
+
+def _read_column_body(
+    worksheet: Worksheet,
+    start_row: int,
+    column: int,
+) -> list[CellValue]:
+    """Read a column downward while value/top-border/bottom-border continues."""
+
+    values: list[CellValue] = []
+    row = start_row
+    while row <= worksheet.max_row:
+        value = worksheet.cell(row=row, column=column).value
+        if (
+            value is not None
+            or _has_top_border(worksheet, row, column)
+            or _has_bottom_border(worksheet, row, column)
+        ):
+            values.append(value)
+            row += 1
+        else:
+            break
+    return values
+
+
+def _find_header_column(
+    worksheet: Worksheet,
+    header_row: int,
+    start_column: int,
+    end_column: int,
+    expected: CellValue,
+    *,
+    match_case: bool,
+    skip: set[int] | None = None,
+) -> int | None:
+    target = _normalize_value(expected, match_case=match_case)
+    for column in range(start_column, end_column + 1):
+        if skip is not None and column in skip:
+            continue
+        actual = worksheet.cell(row=header_row, column=column).value
+        if _normalize_value(actual, match_case=match_case) == target:
+            return column
+    return None
+
+
+def _header_contains(value: CellValue, text: str, *, match_case: bool) -> bool:
+    haystack = "" if value is None else str(value)
+    needle = text
+    if not match_case:
+        haystack = haystack.casefold()
+        needle = needle.casefold()
+    return needle in haystack
 
 
 def _iter_candidate_tables(
