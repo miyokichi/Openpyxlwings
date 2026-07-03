@@ -828,6 +828,44 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
     table.save()
 ```
 
+### 行の値で列を絞り込んで部分テーブルにする
+
+取得済みのテーブルから、**特定の行の値を条件に列を絞り込んだ部分テーブル**を作れます。
+判定に使う行は `find_body_row()` と同じく行見出しで指定します。
+
+```text
+metric   prodA   prodB   prodC   prodD
+sales    120     80      200     50
+rate     0.9     0.6     1.1     0.4    ← この行の値で列を選ぶ
+```
+
+```python
+from openpyxlwings import ExcelWorkbook
+
+with ExcelWorkbook("report.xlsx", visible=False) as book:
+    table = book.get_bordered_table("Metrics", row=2, column=2, header_columns=1)
+
+    # rate 行が 0.8 以上の列だけを持つ部分テーブル
+    subset = table.select_columns_by_row("rate", lambda v: v is not None and v >= 0.8)
+
+    print(subset.column_headers)   # [['prodA', 'prodC']]
+    print(subset.source_columns)   # 各列の元のExcel列番号
+
+    subset.set_body_row_by_header("sales", [150, 210])
+    subset.save()                  # 絞り込んだ列だけ書き戻し
+```
+
+- `condition` には **呼び出し可能オブジェクト**（セルの生の値を受け取って真偽を返す）か、
+  **プレーンな値**（見出し比較と同じ正規化＝前後空白除去・大文字小文字無視で完全一致。
+  `match_case=True` で大小区別）を渡せます
+- 行見出し列（先頭 `header_columns` 列）は常に保持されるので、絞り込み後も
+  `find_body_row()` / `set_body_row_by_header()` がそのまま使えます
+- 1列も条件に合わない場合はエラーになります
+- 元になるテーブルは全体・部分どちらでもよく、部分テーブルから更に絞り込むこともできます
+- 値はコピーされるため、絞り込み後のテーブルを編集しても元のテーブルは変わりません。
+  書き戻し位置がずれないよう、**検出直後（または保存直後）のテーブルから派生させてください**
+  （元テーブルに未保存の行・列追加がある状態で派生させない）
+
 ### 表の検出条件と、見つからないときのチェックリスト
 
 どちらの指定方法でも、表の範囲は同じ「値または罫線があるセルをたどる」領域探索で

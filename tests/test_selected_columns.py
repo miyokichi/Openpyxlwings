@@ -206,6 +206,111 @@ def test_decoy_first_header_on_same_row_is_skipped(tmp_path: Path) -> None:
     assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
 
 
+def make_metrics_workbook(path: Path) -> None:
+    _write_grid(
+        path,
+        "Metrics",
+        [
+            ["metric", "prodA", "prodB", "prodC", "prodD"],
+            ["sales", 120, 80, 200, 50],
+            ["rate", 0.9, 0.6, 1.1, 0.4],
+            ["flag", "OK", "NG", "ok", None],
+        ],
+    )
+
+
+def load_metrics_table(path: Path) -> BorderTable:
+    make_metrics_workbook(path)
+    with ExcelWorkbook(path) as workbook:
+        return workbook.get_bordered_table("Metrics", row=2, column=2, header_columns=1)
+
+
+def test_select_columns_by_row_with_callable_condition(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    subset = table.select_columns_by_row("rate", lambda v: v is not None and v >= 0.8)
+
+    assert subset.partial is True
+    assert subset.source_columns == [2, 3, 5]  # metric + prodA + prodC
+    assert subset.column_headers == [["prodA", "prodC"]]
+    assert subset.row_headers == [["sales"], ["rate"], ["flag"]]
+    assert subset.data == [[120, 0.9, "OK"], [200, 1.1, "ok"]]
+    assert subset.detected_end_row == table.end_row
+    assert subset.detected_end_column == table.end_column
+
+
+def test_select_columns_by_row_with_plain_value_condition(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    # Plain values match like headers: stripped and case-insensitive.
+    subset = table.select_columns_by_row("flag", "ok")
+
+    assert subset.source_columns == [2, 3, 5]
+    assert subset.column_headers == [["prodA", "prodC"]]
+
+    strict = table.select_columns_by_row("flag", "ok", match_case=True)
+    assert strict.source_columns == [2, 5]
+
+
+def test_select_columns_by_row_from_partial_table(tmp_path: Path) -> None:
+    path = tmp_path / "book.xlsx"
+    make_metrics_workbook(path)
+    with ExcelWorkbook(path) as workbook:
+        table = workbook.get_bordered_table(
+            "Metrics",
+            header_values=["metric"],
+            value_header_contains="prod",
+            columns="selected",
+        )
+
+    subset = table.select_columns_by_row("rate", lambda v: v is not None and v >= 0.8)
+
+    assert subset.source_columns == [2, 3, 5]
+    assert subset.data == [[120, 0.9, "OK"], [200, 1.1, "ok"]]
+
+
+def test_select_columns_by_row_edits_do_not_affect_parent(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    subset = table.select_columns_by_row("rate", lambda v: v is not None and v >= 0.8)
+    subset.set_body_value(1, 1, 999)
+
+    assert subset.data[0][0] == 999
+    assert table.data[0][0] == 120
+
+
+def test_select_columns_by_row_rejects_no_match(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    with pytest.raises(BorderTableShapeError, match="no body columns matched"):
+        table.select_columns_by_row("rate", lambda value: False)
+
+    with pytest.raises(BorderTableShapeError, match="row_header was not found"):
+        table.select_columns_by_row("nope", lambda value: True)
+
+
+def test_select_columns_by_row_save_writes_only_selected_columns(tmp_path: Path) -> None:
+    class FakeWorkbook:
+        def __init__(self) -> None:
+            self.saved_table = None
+
+        def _save_bordered_table(self, table: BorderTable) -> None:
+            self.saved_table = table
+
+    table = load_metrics_table(tmp_path / "book.xlsx")
+    fake = FakeWorkbook()
+    table.workbook = fake
+
+    subset = table.select_columns_by_row("rate", lambda v: v is not None and v >= 0.8)
+    subset.set_body_row_by_header("flag", ["A", "B"])
+    subset.save()
+
+    assert fake.saved_table is subset
+    assert fake.saved_table.partial is True
+    assert fake.saved_table.source_columns == [2, 3, 5]
+    assert subset.data == [[120, 0.9, "A"], [200, 1.1, "B"]]
+
+
 def test_selected_columns_read_borderless_values(tmp_path: Path) -> None:
     # Column selection no longer needs any borders; the body of each column
     # is read while values continue.

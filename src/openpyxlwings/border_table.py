@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -170,6 +170,62 @@ class BorderTable:
         table_row_index = self.header_rows + row - 1
         for column, value in zip(self.columns[self.header_columns :], values, strict=True):
             column[table_row_index] = value
+
+    def select_columns_by_row(
+        self,
+        row_header: CellValue | list[CellValue] | tuple[CellValue, ...],
+        condition: Callable[[CellValue], bool] | CellValue,
+        *,
+        match_case: bool = False,
+    ) -> BorderTable:
+        """Return a partial table of the body columns matching ``condition``.
+
+        The row used for the comparison is selected by row header, like
+        :meth:`find_body_row`. ``condition`` is either a callable that
+        receives each column's raw value on that row, or a plain value that
+        is compared like header matching (whitespace-stripped and, unless
+        ``match_case`` is set, case-insensitive). Row-header columns are
+        always kept.
+
+        Values are copied, so editing the returned table does not affect
+        this one. Saving the returned table writes only the selected columns
+        back; derive it from a freshly detected (or saved) table so its
+        bounds match the sheet.
+        """
+
+        row = self.find_body_row(row_header)
+        table_row_index = self.header_rows + row - 1
+
+        if callable(condition):
+            matches = condition
+        else:
+            expected = _normalize_value(condition, match_case=match_case)
+
+            def matches(value: CellValue) -> bool:
+                return _normalize_value(value, match_case=match_case) == expected
+
+        kept_indexes = list(range(self.header_columns))
+        kept_indexes.extend(
+            index
+            for index in range(self.header_columns, self.column_count)
+            if matches(self.columns[index][table_row_index])
+        )
+        if len(kept_indexes) == self.header_columns:
+            raise BorderTableShapeError("no body columns matched the condition.")
+
+        return BorderTable(
+            workbook=self.workbook,
+            sheet=self.sheet,
+            start_row=self.start_row,
+            start_column=self.start_column,
+            columns=[list(self.columns[index]) for index in kept_indexes],
+            header_rows=self.header_rows,
+            header_columns=self.header_columns,
+            source_columns=[self.source_columns[index] for index in kept_indexes],
+            partial=True,
+            detected_end_row=self.end_row,
+            detected_end_column=self.end_column,
+        )
 
     def add_row(
         self,
