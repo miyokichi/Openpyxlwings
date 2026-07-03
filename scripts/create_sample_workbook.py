@@ -70,7 +70,7 @@ def create_quick_read_write_sheet(workbook: Workbook) -> None:
 def create_bordered_table_sheet(workbook: Workbook) -> None:
     sheet = workbook.create_sheet("BorderedTable")
     sheet["A1"] = "罫線テーブル編集サンプル"
-    sheet["A2"] = "C5など、表内のセルを起点に get_bordered_table() を試せます。"
+    sheet["A2"] = "表の左上セル（B4）を起点に get_bordered_table() を試せます。"
 
     values = [
         [None, "2026", "2027", "2028"],
@@ -92,7 +92,7 @@ def create_bordered_table_sheet(workbook: Workbook) -> None:
 
     style_title(sheet, "A1:F1")
     sheet["B11"] = "Manual test:"
-    sheet["B12"] = 'table = book.get_bordered_table("BorderedTable", row=5, column=3, header_rows=2, header_columns=1)'
+    sheet["B12"] = 'table = book.get_bordered_table("BorderedTable", row=4, column=2, header_rows=2, header_columns=1)'
     sheet["B13"] = "table.add_row([88, 99, 111], row_headers=['South']); table.save()"
     sheet["B12"].font = Font(name="Consolas", size=10)
     sheet["B13"].font = Font(name="Consolas", size=10)
@@ -135,7 +135,7 @@ def create_amount_header_sheet(workbook: Workbook) -> None:
     set_widths(sheet, [4, 18, 18, 14, 14, 18, 4])
 
     sheet["B10"] = "Manual test:"
-    sheet["B11"] = 'table = book.get_bordered_table_by_header("AmountHeaders", ["header1", "header2"], value_header_contains="amount")'
+    sheet["B11"] = 'table = book.get_bordered_table("AmountHeaders", header_values=["header1", "header2"], value_header_contains="amount")'
     sheet["B12"] = "print(table.row_headers); print(table.column_headers); print(table.data)"
     sheet["B11"].font = Font(name="Consolas", size=10)
     sheet["B12"].font = Font(name="Consolas", size=10)
@@ -144,7 +144,7 @@ def create_amount_header_sheet(workbook: Workbook) -> None:
 def create_broken_table_sheet(workbook: Workbook) -> None:
     sheet = workbook.create_sheet("BrokenBorder")
     sheet["A1"] = "壊れた罫線テーブル例"
-    sheet["A2"] = "内部罫線が欠けているため、get_bordered_table() は例外を出す想定です。"
+    sheet["A2"] = "内部罫線が欠けていても、左上セル起点の get_bordered_table() で読み取れます。"
     values = [["Name", "Q1"], ["Alice", 10], ["Bob", 20]]
     for row_offset, row in enumerate(values, start=4):
         for column_offset, value in enumerate(row, start=2):

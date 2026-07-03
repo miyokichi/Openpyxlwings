@@ -470,18 +470,18 @@ def _detect_candidate_bounds(
     row: int,
     column: int,
 ) -> tuple[int, int, int, int]:
-    from openpyxlwings.border_table import detect_bordered_table
+    from openpyxlwings.border_table import _cell_has_content, _grow_region
 
-    table = detect_bordered_table(
-        workbook,
-        worksheet,
-        worksheet.title,
-        row,
-        column,
-        header_rows=0,
-        header_columns=0,
+    start_row, start_column, end_row, end_column = _grow_region(
+        worksheet, row, column, row, column
     )
-    return table.start_row, table.start_column, table.end_row, table.end_column
+    if (
+        end_row == row
+        and end_column == column
+        and not _cell_has_content(worksheet, row, column)
+    ):
+        raise BorderTableNotFoundError("A table was not found at the candidate cell.")
+    return start_row, start_column, end_row, end_column
 
 
 def _pattern_bounds(worksheet: Worksheet) -> tuple[int, int, int, int]:
