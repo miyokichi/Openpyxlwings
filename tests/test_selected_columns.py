@@ -9,6 +9,7 @@ from openpyxl.styles import Border, Side
 from openpyxlwings import BorderTable, ExcelWorkbook, WritePlan
 from openpyxlwings.exceptions import BorderTableNotFoundError, BorderTableShapeError
 from openpyxlwings.plan import _BorderedTableOp
+from openpyxlwings.workbook import _XlwingsWriteSession
 
 THIN = Side(style="thin")
 FULL = Border(top=THIN, bottom=THIN, left=THIN, right=THIN)
@@ -294,7 +295,7 @@ def test_select_columns_by_row_save_writes_only_selected_columns(tmp_path: Path)
         def __init__(self) -> None:
             self.saved_table = None
 
-        def _save_bordered_table(self, table: BorderTable) -> None:
+        def _save_bordered_table(self, table: BorderTable, path=None) -> None:
             self.saved_table = table
 
     table = load_metrics_table(tmp_path / "book.xlsx")
@@ -488,7 +489,7 @@ def test_save_delegates_to_workbook_and_rebaselines() -> None:
         def __init__(self) -> None:
             self.saved_table = None
 
-        def _save_bordered_table(self, table: BorderTable) -> None:
+        def _save_bordered_table(self, table: BorderTable, path=None) -> None:
             self.saved_table = table
 
     workbook = FakeWorkbook()
@@ -504,6 +505,30 @@ def test_save_delegates_to_workbook_and_rebaselines() -> None:
     assert table.source_columns == [2, 3, 4]
     assert table.detected_end_column == 4
     assert table._insertions == []
+
+
+def test_writer_save_bordered_table_forwards_path_to_save() -> None:
+    # The writer applies the edit, then saves; a path must reach save() so the
+    # workbook is written to a separate file (Save As).
+    class RecordingWriter(_XlwingsWriteSession):
+        def __init__(self) -> None:
+            self.applied = False
+            self.save_path = "unset"
+
+        def apply_bordered_table(self, *args, **kwargs) -> None:
+            self.applied = True
+
+        def save(self, path=None) -> None:
+            self.save_path = path
+
+    writer = RecordingWriter()
+    writer.save_bordered_table(make_partial_table(), "out.xlsx")
+
+    assert writer.applied is True
+    assert writer.save_path == "out.xlsx"
+
+    writer.save_bordered_table(make_partial_table())
+    assert writer.save_path is None
 
 
 def test_write_plan_snapshots_partial_table() -> None:

@@ -506,9 +506,11 @@ def test_border_table_save_delegates_to_workbook() -> None:
     class FakeWorkbook:
         def __init__(self) -> None:
             self.saved_table = None
+            self.saved_path = "unset"
 
-        def _save_bordered_table(self, table: BorderTable) -> None:
+        def _save_bordered_table(self, table: BorderTable, path=None) -> None:
             self.saved_table = table
+            self.saved_path = path
 
     workbook = FakeWorkbook()
     table = BorderTable(
@@ -523,7 +525,30 @@ def test_border_table_save_delegates_to_workbook() -> None:
     table.save()
 
     assert workbook.saved_table is table
+    assert workbook.saved_path is None
     assert table._insertions == []
+
+
+def test_border_table_save_forwards_path_for_save_as() -> None:
+    class FakeWorkbook:
+        def __init__(self) -> None:
+            self.saved_path = "unset"
+
+        def _save_bordered_table(self, table: BorderTable, path=None) -> None:
+            self.saved_path = path
+
+    workbook = FakeWorkbook()
+    table = BorderTable(
+        workbook=workbook,  # type: ignore[arg-type]
+        sheet="Report",
+        start_row=1,
+        start_column=1,
+        columns=[["Name", "Alice"], ["Score", 10]],
+    )
+
+    table.save("copy.xlsx")
+
+    assert workbook.saved_path == "copy.xlsx"
 
 
 def test_repeated_bordered_table_reads_reuse_single_file_open(

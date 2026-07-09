@@ -656,6 +656,12 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 `set_body_value()` は見出しを除いた本文部分の位置で指定します。
 どちらも 1 始まりです。
 
+`table.save()` は元のファイルへ書き戻しますが、`table.save("out.xlsx")` のように
+**パスを渡すと元ファイルを変更せず別ファイルへ保存**します（Excel の「名前を付けて保存」）。
+元ファイルを残したままテンプレートを別名で書き出したいときに便利です。
+なお別名保存すると、それ以降このセッションの保存先は新しいファイルに切り替わるため、
+続けて `table.save()`（パス省略）を呼ぶと同じ新ファイルへ保存されます。
+
 行見出しで本文行を探して、行全体を差し替えることもできます。
 
 ```python
@@ -1063,7 +1069,8 @@ from openpyxlwings import ExcelWorkbook, WritePlan
 | `book.get_bordered_table(sheet, *, row=None, column=None, header_values=None, value_header_contains=None, columns="all", header_rows=1, header_columns=0, match_case=False)` | 表を取得する。`row`/`column`（左上セル指定）か `header_values`（見出し指定）のどちらかで表を探す。どちらも罫線不要のゆるい領域探索で、`columns="selected"` で指定列のみの部分テーブルを返す |
 | `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
 | `book.extract(pattern, sheets=None, ranges=None)` | フォーマットに一致する表をすべて抽出する |
-| `book.save(path=None)` | 明示的に保存する |
+| `table.save(path=None)` | 編集した罫線テーブルを書き戻す。`path` 指定で元ファイルを変更せず別ファイルへ保存 |
+| `book.save(path=None)` | 明示的に保存する。`path` 指定で元ファイルを変更せず別ファイルへ保存 |
 | `book.close(save=True)` | 開いている内部セッションを閉じる |
 
 互換用の名前
