@@ -343,9 +343,9 @@ class ExcelWorkbook:
 
         return extract_pattern(self, pattern, sheets=sheets, ranges=ranges)
 
-    def _save_bordered_table(self, table: BorderTable) -> None:
+    def _save_bordered_table(self, table: BorderTable, path: str | Path | None = None) -> None:
         self._reader.close()
-        self._writer.save_bordered_table(table)
+        self._writer.save_bordered_table(table, path)
 
 
 class _OpenpyxlReadSession:
@@ -629,7 +629,7 @@ class _XlwingsWriteSession:
             _range_address(start_row, start_column, end_row, end_column),
         )
 
-    def save_bordered_table(self, table: BorderTable) -> None:
+    def save_bordered_table(self, table: BorderTable, path: str | Path | None = None) -> None:
         self.apply_bordered_table(
             table.sheet,
             partial=table.partial,
@@ -644,7 +644,7 @@ class _XlwingsWriteSession:
             end_column=table.end_column,
             insertions=[(insertion.axis, insertion.index) for insertion in table._insertions],
         )
-        self.save()
+        self.save(path)
 
     def apply_bordered_table(
         self,

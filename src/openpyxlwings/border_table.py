@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from openpyxl.utils import get_column_letter
@@ -338,10 +339,16 @@ class BorderTable:
         self.header_columns += 1
         self._insertions.append(_Insertion("column", self.start_column + table_column_index))
 
-    def save(self) -> None:
-        """Write the edited table back to its original workbook position."""
+    def save(self, path: str | Path | None = None) -> None:
+        """Write the edited table back to its workbook position.
 
-        self.workbook._save_bordered_table(self)
+        With ``path`` the edit is saved to a separate file, leaving the
+        original file unchanged. As with a spreadsheet "Save As", the session's
+        working workbook then becomes that new file, so later ``save()`` calls
+        without a path also target it.
+        """
+
+        self.workbook._save_bordered_table(self, path)
         if self.partial:
             # Rebaseline so a second save does not re-insert the same rows and
             # columns: appended columns now exist at the table's right edge.
