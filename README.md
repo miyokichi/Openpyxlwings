@@ -1,96 +1,54 @@
-openpyxlwings
-=============
+# openpyxlwings
 
-`openpyxlwings` は、Excel ファイルを「高速に読み取り」「既存ブックを壊しにくく書き込み」するための Python ライブラリです。
+`openpyxlwings` は、Excel ファイルを高速に読み取り、既存ブックの画像・図形・グラフなどを壊しにくい方法で書き込むための Python ライブラリです。
 
-中心になるクラスは `ExcelWorkbook` です。
-読み取りと書き込みで別々のクラスを使う必要はありません。
+- 読み取りには `openpyxl` を使うため、Microsoft Excel を起動しません。
+- 書き込みには `xlwings` を使い、Microsoft Excel 本体を通して保存します。
+- 読み取りと書き込みは、どちらも `ExcelWorkbook` から操作できます。
+- 帳票テンプレートへの値の流し込み、罫線表の編集、定型フォーマットからのデータ抽出に対応しています。
 
-- 読み取りは `openpyxl` を使います。
-- 書き込みは `xlwings` を使い、Excel 本体経由で保存します。
-- 書き込み時は、既にユーザーが開いている Excel 画面を操作せず、ライブラリ専用の Excel インスタンスを作って処理します。
-- 画像、図形、グラフ、印刷設定、マクロなどを含むテンプレートファイルへの値流し込みを想定しています。
+## 目次
 
-目次
-----
-
-- [このライブラリが向いている場面](#このライブラリが向いている場面)
-- [仕組み](#仕組み)
-- [書き込み時の安全方針](#書き込み時の安全方針)
+- [必要環境](#必要環境)
 - [インストール](#インストール)
-- [サンプルExcel](#サンプルexcel)
-- [注意点](#注意点)
-- [基本的な使い方](#基本的な使い方)
-- [読み取り](#読み取り)
-- [便利関数](#便利関数)
-- [書き込み](#書き込み)
-- [書き込み指示を貯めてから実行する（WritePlan）](#書き込み指示を貯めてから実行するwriteplan)
-- [帳票テンプレートに値を流し込む例](#帳票テンプレートに値を流し込む例)
-- [罫線で区切られた表を編集する](#罫線で区切られた表を編集する)
-- [Excelフォーマットから表を抽出する](#excelフォーマットから表を抽出する)
-- [API 一覧](#api-一覧)
-- [互換用の名前](#互換用の名前)
-- [旧APIからの移行](#旧apiからの移行)
-- [CLI](#cli)
-- [開発メモ](#開発メモ)
+- [クイックスタート](#クイックスタート)
+- [設計と安全性](#設計と安全性)
+- [基本操作](#基本操作)
+  - [読み取り](#読み取り)
+  - [便利関数](#便利関数)
+  - [書き込み](#書き込み)
+- [書き込み指示をまとめる（WritePlan）](#書き込み指示をまとめるwriteplan)
+- [使用例：帳票テンプレートへの書き込み](#使用例帳票テンプレートへの書き込み)
+- [高度な表操作](#高度な表操作)
+  - [罫線表を検出・編集する](#罫線表を検出編集する)
+  - [Excelフォーマットから表を抽出する](#excelフォーマットから表を抽出する)
+- [リファレンス](#リファレンス)
+  - [API 一覧](#api-一覧)
+  - [CLI](#cli)
+  - [旧APIからの移行](#旧apiからの移行)
+- [開発](#開発)
 - [ライセンス](#ライセンス)
 
-このライブラリが向いている場面
-------------------------------
+## 必要環境
 
-- Excel ファイルから大量の値を速く読み取りたい
-- 画像や図形入りの帳票テンプレートに値を書き込みたい
-- `openpyxl` で保存したときに画像や図形が消える問題を避けたい
-- 読み取りは軽く、書き込みだけ Excel 本体に任せたい
-- ユーザーが開いている Excel 作業画面に干渉したくない
+- Python 3.12 以上
+- 読み取りのみ: Microsoft Excel は不要
+- 書き込み: `xlwings` と Microsoft Excel が必要
 
-仕組み
-------
+主に、Microsoft Excel がインストールされた Windows 環境を想定しています。
 
-`ExcelWorkbook` の中で、読み取り用と書き込み用の処理を内部的に分けています。
+## インストール
 
-| 処理 | 内部で使うもの | 目的 |
-| --- | --- | --- |
-| 読み取り | `openpyxl` | Excel を起動せず、高速に値を読む |
-| 書き込み | `xlwings` | Excel 本体で開いて値を書き、既存オブジェクトを壊しにくく保存する |
-
-`openpyxl` は読み取りには便利ですが、複雑な Excel ファイルを保存すると Excel 独自のオブジェクトに影響が出ることがあります。
-そのため、このライブラリでは `openpyxl` を読み取り専用に使い、書き込みは `xlwings` 経由で Excel に任せます。
-
-書き込み時の安全方針
---------------------
-
-書き込みでは、既に開いている Excel アプリケーションを探して使うのではなく、原則として新しい Excel インスタンスを作成します。
-これにより、ユーザーが手作業で開いている Excel ウィンドウやブックを誤って操作しにくくしています。
-
-また、対象ファイルが既に Excel で開かれていて読み取り専用になった場合は、無理に保存せずエラーにします。
-これは、ユーザーが開いているブックに裏側から勝手に書き込まないためです。
-
-インストール
-------------
-
-このリポジトリをローカルでインストールする場合:
+このリポジトリをローカルへインストールします。
 
 ```bash
 pip install .
 ```
 
-uv で開発環境を作る場合:
+開発環境を作る場合は、dev 依存関係も同期します。
 
 ```bash
 uv sync --dev
-```
-
-テスト:
-
-```bash
-uv run pytest
-```
-
-配布用ファイルの作成:
-
-```bash
-uv build
 ```
 
 wheel を直接インストールする場合:
@@ -99,94 +57,67 @@ wheel を直接インストールする場合:
 pip install dist/openpyxlwings-0.1.0-py3-none-any.whl
 ```
 
-サンプルExcel
--------------
+## クイックスタート
 
-動作確認用のサンプルファイルを用意しています。
+読み取りと書き込みは、同じ `ExcelWorkbook` から行えます。
 
-```text
-samples/openpyxlwings_sample.xlsx
+```python
+from openpyxlwings import ExcelWorkbook
+
+with ExcelWorkbook("report.xlsx", visible=False) as book:
+    rows = book.read_range("Data", "A1:D20")
+    book.write_values("Summary", "B2", "更新済み")
+
+print(rows)
 ```
 
-含まれるシート:
+読み取りだけなら Excel は起動しません。最初の書き込み時にライブラリ専用の Excel インスタンスが起動し、`with` ブロックを正常に抜けると保存して閉じます。途中で例外が発生した場合は保存しません。
+
+### サンプルファイル
+
+動作確認には [samples/openpyxlwings_sample.xlsx](samples/openpyxlwings_sample.xlsx) を利用できます。
 
 | シート名 | 内容 |
 | --- | --- |
-| `QuickReadWrite` | 通常の読み取り・書き込みAPIを試すための表 |
-| `BorderedTable` | 罫線テーブル検出・編集を試すための表 |
-| `BrokenBorder` | 内部罫線が欠けていても読み取れることの確認用の表 |
+| `QuickReadWrite` | 基本的な読み取り・書き込み |
+| `BorderedTable` | 罫線表の検出・編集 |
+| `BrokenBorder` | 内部罫線が欠けた表の読み取り |
 
-サンプルファイルを再生成する場合:
+サンプルファイルを再生成するには、次を実行します。
 
 ```bash
 uv run python scripts/create_sample_workbook.py
 ```
 
-罫線テーブルの読み取り例:
+## 設計と安全性
 
-```python
-from openpyxlwings import ExcelWorkbook
+`ExcelWorkbook` は、処理に応じて内部の実装を切り替えます。
 
-with ExcelWorkbook("samples/openpyxlwings_sample.xlsx") as book:
-    table = book.get_bordered_table(
-        "BorderedTable",
-        row=4,      # 表の左上セル
-        column=2,
-        header_rows=2,
-        header_columns=1,
-    )
+| 処理 | 使用ライブラリ | 動作 |
+| --- | --- | --- |
+| 読み取り | `openpyxl` | Excel を起動せず、値を高速に読む |
+| 書き込み | `xlwings` | Excel 本体で値を書き、既存オブジェクトを保ったまま保存する |
 
-    print(table.range)
-    print(table.column_headers)
-    print(table.row_headers)
-    print(table.data)
-```
+書き込み時は、ユーザーが既に開いている Excel ではなく、原則として新しい専用インスタンスを作成します。対象ファイルが別の Excel で開かれて読み取り専用になった場合は、裏側から無理に保存せずエラーにします。
 
-注意点
-------
+> [!NOTE]
+> この設計は、画像、図形、グラフ、印刷設定、マクロなどを含むテンプレートへ値を書き込む用途を想定しています。
 
-読み取りだけなら Microsoft Excel は不要です。
+## 基本操作
 
-書き込みには `xlwings` と Microsoft Excel が必要です。
-このライブラリは、特に Windows 上で Excel がインストールされている環境を想定しています。
-
-基本的な使い方
---------------
-
-### 1つのクラスで読み書きする
+セル位置は `"B2"` のようなアドレス、または1始まりの行番号・列番号で指定できます。
 
 ```python
 from openpyxlwings import ExcelWorkbook
 
 with ExcelWorkbook("report.xlsx") as book:
-    rows = book.read_range("Data", "A1:D20")
-    book.write_values("Summary", "B2", "更新済み")
+    value = book.read_cell_at("Sheet1", row=2, column=2)  # B2
+    book.write_values_at("Sheet1", row=3, column=2, values="完了")  # B3
 ```
 
-`ExcelWorkbook` は、読み取り時には `openpyxl` を使い、書き込み時には `xlwings` を使います。
-利用者側で reader / writer を切り替える必要はありません。
+### 読み取り
 
-### 行番号・列番号でアクセスする
-
-`"B2"` のような Excel 形式のアドレスではなく、行番号と列番号でもアクセスできます。
-行番号・列番号は Excel と同じく 1 始まりです。
-
-```python
-from openpyxlwings import ExcelWorkbook
-
-with ExcelWorkbook("report.xlsx") as book:
-    value = book.read_cell_at("Sheet1", row=2, column=2)
-    book.write_values_at("Sheet1", row=3, column=2, values="完了")
-
-print(value)
-```
-
-この例では、`row=2, column=2` が `B2`、`row=3, column=2` が `B3` に対応します。
-
-読み取り
---------
-
-### 範囲を読み取る
+#### 範囲を読み取る
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -207,7 +138,7 @@ print(values)
 ]
 ```
 
-### 1つのセルを読み取る
+#### 1つのセルを読み取る
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -218,7 +149,7 @@ with ExcelWorkbook("report.xlsx") as book:
 print(title)
 ```
 
-### 行番号・列番号で1つのセルを読み取る
+#### 行番号・列番号で1つのセルを読み取る
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -229,7 +160,7 @@ with ExcelWorkbook("report.xlsx") as book:
 print(score)
 ```
 
-### 行番号・列番号で範囲を読み取る
+#### 行番号・列番号で範囲を読み取る
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -246,7 +177,7 @@ with ExcelWorkbook("report.xlsx") as book:
 print(rows)
 ```
 
-### シート全体を読み取る
+#### シート全体を読み取る
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -260,7 +191,7 @@ for row in rows:
 
 `read_sheet()` は、末尾の空行や空列を取り除いた二次元リストを返します。
 
-### シート名を取得する
+#### シート名を取得する
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -269,8 +200,7 @@ with ExcelWorkbook("report.xlsx") as book:
     print(book.sheet_names())
 ```
 
-便利関数
---------
+### 便利関数
 
 短い処理なら、クラスを明示せずに便利関数も使えます。
 
@@ -298,10 +228,9 @@ rows = read_range_at(
 )
 ```
 
-書き込み
---------
+### 書き込み
 
-### 1つのセルに書き込む
+#### 1つのセルに書き込む
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -310,7 +239,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
     book.write_values("Summary", "B2", "完了")
 ```
 
-### 行番号・列番号で書き込む
+#### 行番号・列番号で書き込む
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -319,7 +248,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
     book.write_values_at("Summary", row=2, column=2, values="完了")
 ```
 
-### 表形式のデータを書き込む
+#### 表形式のデータを書き込む
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -335,7 +264,7 @@ with ExcelWorkbook("report.xlsx") as book:
     book.write_values("Data", "A1", data)
 ```
 
-### 複数箇所にまとめて書き込む
+#### 複数箇所にまとめて書き込む
 
 同じファイルに複数回書き込む場合も、`ExcelWorkbook` を1つ使えば大丈夫です。
 
@@ -355,7 +284,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 `with` ブロックを正常に抜けると、自動で保存して閉じます。
 途中で例外が発生した場合は、保存せずに閉じます。
 
-### 値だけを消してから書き込む
+#### 値だけを消してから書き込む
 
 `clear_contents()` は、指定範囲の値や数式だけを消します。
 セルの書式、画像、図形、グラフは削除しません。
@@ -386,7 +315,7 @@ with ExcelWorkbook("template.xlsx") as book:
     )
 ```
 
-### 便利関数で書き込む
+#### 便利関数で書き込む
 
 一度だけ書き込むなら `write_values()` も使えます。
 
@@ -404,8 +333,7 @@ from openpyxlwings import write_values_at
 write_values_at("report.xlsx", "Summary", row=2, column=2, values="完了")
 ```
 
-書き込み指示を貯めてから実行する（WritePlan）
-----------------------------------------------
+## 書き込み指示をまとめる（WritePlan）
 
 `WritePlan` を使うと、書き込み内容を `with` ブロックの外で先に組み立てておき、`with` ブロック内の好きなタイミングで `book.apply()` を呼んでまとめて実行できます。
 
@@ -535,8 +463,7 @@ finally:
 `book.apply(plan, save=False)` のように `save=False` を渡すと、保存せずに書き込みだけ行います。
 その場合でも、`with` ブロックを正常に抜けるときに自動で保存されます。
 
-帳票テンプレートに値を流し込む例
-------------------------------
+## 使用例：帳票テンプレートへの書き込み
 
 `template.xlsx` にロゴ画像、図形、印刷設定、数式、グラフが入っている想定です。
 `input.xlsx` から値を読み取り、テンプレートの指定範囲だけを書き換えます。
@@ -559,8 +486,9 @@ with ExcelWorkbook(template_path, visible=False) as template:
 この処理では、読み取り側は Excel を起動しません。
 書き込み側だけ Excel を起動しますが、ユーザーが既に開いている Excel ではなく、ライブラリ専用のインスタンスで処理します。
 
-罫線で区切られた表を編集する
-----------------------------
+## 高度な表操作
+
+### 罫線表を検出・編集する
 
 Excel の「テーブル機能」ではなく、普通のセル範囲に作られた表も扱えます。
 **表の左上セル** を指定すると、そこから右・下方向に表の範囲を探索します。
@@ -602,7 +530,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
 見出しで探す2つのモード（`columns="all"` / `"selected"`）の詳しい動きは後述します。
 
-### 罫線がなくても読める（検出のしくみ）
+#### 罫線がなくても読める（検出のしくみ）
 
 表の範囲探索は「セルに **値があるか、何かしらの罫線があるか**」だけを見ます。
 左上セル指定でも見出し指定でも同じ探索を使うので、次のような表がすべて同じ書き方で読めます。
@@ -638,7 +566,7 @@ with ExcelWorkbook("report.xlsx") as book:
 つまり「値も罫線もない空の行・列で表が囲まれている」ことが唯一の前提です。
 表の中に完全に空の行（値も罫線もない行）があると、そこで表が終わったと判断されるので注意してください。
 
-### 表の中身を変更する
+#### 表の中身を変更する
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -681,7 +609,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 行見出し列が複数ある場合は、`("東日本", "法人")` のようにすべての行見出し値を指定します。
 同じ行見出しに複数行が一致する場合は、誤更新を避けるためエラーになります。
 
-### 行や列を追加する
+#### 行や列を追加する
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -699,7 +627,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 `add_column()` は本文列を追加します。
 保存時には Excel 上で行や列を挿入するため、表の下や右にある既存セルを上書きせず、押し出して表を広げます。
 
-### 見出しを追加する
+#### 見出しを追加する
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -716,7 +644,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 追加された行や列には罫線を引き直します。
 v1では罫線のみを整え、塗りつぶしやフォント、表示形式の完全コピーは行いません。
 
-### 見出し行の値から罫線テーブルを探す
+#### 見出し行の値から罫線表を探す
 
 セル位置がわからなくても、`header_values` を指定すると見出しの値から表を探せます。
 次のように、左側に行見出し列があり、右側に `amount` のような値列が複数続く表を想定しています。
@@ -756,7 +684,7 @@ with ExcelWorkbook("report.xlsx") as book:
 - `value_header_contains` は必須で、値領域の始まりを決めます
 - 見出しが表の1行目にない場合は `header_rows=2` のように見出し行の位置を指定します
 
-### 列見出しの一部だけ指定して取得する（部分テーブル）
+#### 列見出しの一部だけ指定して取得する（部分テーブル）
 
 `columns="selected"` を指定すると、**必要な列だけ** を指定してその列のデータだけを
 取得できます。戻り値は同じ `BorderTable` ですが `partial=True` の **部分テーブル** になり、
@@ -809,7 +737,7 @@ with ExcelWorkbook("report.xlsx") as book:
 
 `WritePlan` への予約は全体・部分どちらも `plan.add_bordered_table(table)` です。
 
-### 部分テーブルでも行見出しで本文行を探す
+#### 部分テーブルでも行見出しで本文行を探す
 
 `find_body_row()` / `set_body_row_by_header()` は部分テーブルでも同じように使えます。
 行見出しとして扱われるのは `header_values` で指定した列（完全一致で選んだ列）で、
@@ -834,7 +762,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
     table.save()
 ```
 
-### 行の値で列を絞り込んで部分テーブルにする
+#### 行の値で列を絞り込んで部分テーブルにする
 
 取得済みのテーブルから、**特定の行の値を条件に列を絞り込んだ部分テーブル**を作れます。
 判定に使う行は `find_body_row()` と同じく行見出しで指定します。
@@ -872,7 +800,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
   書き戻し位置がずれないよう、**検出直後（または保存直後）のテーブルから派生させてください**
   （元テーブルに未保存の行・列追加がある状態で派生させない）
 
-### 表の検出条件と、見つからないときのチェックリスト
+#### 表の検出条件と、見つからないときのチェックリスト
 
 どちらの指定方法でも、表の範囲は同じ「値または罫線があるセルをたどる」領域探索で
 決まります（終了条件は前述）。罫線の欠け・罫線なし・値なし・結合セルをすべて許容し、
@@ -899,8 +827,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 すべての行見出し値を指定します。同じ行見出しに複数行が一致する場合は、誤更新を
 避けるためエラーになります。
 
-Excelフォーマットから表を抽出する
-----------------------------------
+### Excelフォーマットから表を抽出する
 
 別のExcelファイルを「表のフォーマット定義」として使い、同じ構造を持つ表を対象ブックから自動検索できます。
 フォーマット定義は1シートにつき1パターンで、シート名がパターン名になります。
@@ -912,7 +839,7 @@ samples/extraction_format.xlsx
 samples/extraction_input.xlsx
 ```
 
-### フォーマットExcelを作る
+#### フォーマットExcelを作る
 
 `extraction_format.xlsx` の `amount_table` シートには、次のような2行のひな形が入っています。
 
@@ -936,7 +863,7 @@ header1             header2             {{columns[].header | contains("amount")}
 固定文字は対象Excelと完全一致する必要があります。
 空のテンプレートセルは照合対象外です。
 
-### `{{title}}` で単一セルを取得する
+#### `{{title}}` で単一セルを取得する
 
 繰り返しではない単一セルは、単純な名前のプレースホルダーで取得できます。
 例えば、フォーマットExcelの `report_info` シートを次のように作ります。
@@ -977,7 +904,7 @@ print(report.data)
 
 数式セルの場合は、計算済みの値が `data["title"]`、数式文字列が `formulas["title"]` に入ります。
 
-### 対象Excelから抽出する
+#### 対象Excelから抽出する
 
 ```python
 from openpyxlwings import ExcelFormat, ExcelWorkbook
@@ -1027,7 +954,7 @@ for match in matches:
 
 Excelに数式の計算結果が保存されていない場合、`data` の値は `None` でも `formulas` には `=SUM(...)` などの式が入ります。
 
-### 検索対象を絞る
+#### 検索対象を絞る
 
 ```python
 with ExcelWorkbook("input.xlsx") as book:
@@ -1044,8 +971,9 @@ with ExcelWorkbook("input.xlsx") as book:
 v1では、可変行のプロトタイプをフォーマット表の最終行、可変列のプロトタイプを最終列に配置してください。
 YAMLフォーマットと入れ子になった複数階層の繰り返しは、現在未対応です。
 
-API 一覧
---------
+## リファレンス
+
+### API 一覧
 
 ```python
 from openpyxlwings import ExcelWorkbook, WritePlan
@@ -1073,8 +1001,7 @@ from openpyxlwings import ExcelWorkbook, WritePlan
 | `book.save(path=None)` | 明示的に保存する。`path` 指定で元ファイルを変更せず別ファイルへ保存 |
 | `book.close(save=True)` | 開いている内部セッションを閉じる |
 
-互換用の名前
-------------
+### 互換用の名前
 
 以前のコード向けに、以下の名前も残しています。
 ただし、新しく書くコードでは `ExcelWorkbook` を使うのがおすすめです。
@@ -1086,8 +1013,7 @@ assert ExcelReader is ExcelWorkbook
 assert ExcelWriter is ExcelWorkbook
 ```
 
-旧APIからの移行
----------------
+### 旧APIからの移行
 
 罫線テーブルの取得APIは `get_bordered_table()` 1本に統合しました。
 旧APIと旧クラスは削除済みです。次の対応で書き換えてください。
@@ -1114,8 +1040,7 @@ assert ExcelWriter is ExcelWorkbook
 | `set_value(row, column, ...)` | 本文基準の座標 | 見出しを含む表全体の座標（本文基準は `set_body_value()`） |
 | 途中への行挿入 | 保存時は末尾にまとめて挿入 | 保存時もその位置に行挿入 |
 
-CLI
----
+### CLI
 
 シート名を表示:
 
@@ -1129,8 +1054,7 @@ openpyxlwings sheets report.xlsx
 openpyxlwings read report.xlsx Sheet1 A1:D20
 ```
 
-開発メモ
---------
+## 開発
 
 このパッケージは `src/` レイアウトです。
 
@@ -1155,7 +1079,6 @@ uv run pytest
 uv build
 ```
 
-ライセンス
-----------
+## ライセンス
 
 MIT License です。詳細は `LICENSE` を参照してください。
