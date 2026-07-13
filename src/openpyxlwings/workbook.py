@@ -633,6 +633,7 @@ class _XlwingsWriteSession:
         self.apply_bordered_table(
             table.sheet,
             partial=table.partial,
+            partial_axis=table.partial_axis,
             start_row=table.start_row,
             start_column=table.start_column,
             header_rows=table.header_rows,
@@ -640,6 +641,7 @@ class _XlwingsWriteSession:
                 (source, list(column))
                 for source, column in zip(table.source_columns, table.columns, strict=True)
             ],
+            source_rows=list(table.source_rows),
             end_row=table.end_row,
             end_column=table.end_column,
             insertions=[(insertion.axis, insertion.index) for insertion in table._insertions],
@@ -651,10 +653,12 @@ class _XlwingsWriteSession:
         sheet: str | None,
         *,
         partial: bool,
+        partial_axis: str | None = None,
         start_row: int,
         start_column: int,
         header_rows: int,
         columns: Sequence[tuple[int | None, list[CellValue]]],
+        source_rows: Sequence[int | None] | None = None,
         end_row: int,
         end_column: int,
         insertions: Sequence[tuple[str, int]],
@@ -662,11 +666,14 @@ class _XlwingsWriteSession:
         """Write an edited bordered table back without saving the workbook.
 
         ``columns`` holds ``(source_column, values)`` pairs, column-major and
-        header rows included. A full table is rewritten as one rectangle. For
-        a partial table only the held columns are written: sourced columns go
-        back to their Excel columns starting at the header row, and columns
-        without a source are inserted at the table's right edge. In both cases
-        the final rectangle's borders are redrawn.
+        header rows included. A full table is rewritten as one rectangle. A
+        column-partial table writes only the held columns (sourced columns go
+        back to their Excel columns; sourceless columns are inserted at the
+        right edge). A row-partial table writes only the held rows back to
+        their original Excel rows (``source_rows``), appends sourceless rows at
+        the bottom and sourceless columns at the right edge, and leaves
+        unmatched rows untouched. In all cases the rectangle's borders are
+        redrawn.
         """
 
         for axis, index in insertions:
@@ -675,7 +682,17 @@ class _XlwingsWriteSession:
             else:
                 self.insert_column(sheet, index)
 
-        if partial:
+        if partial and partial_axis == "row":
+            self._apply_row_partial_table(
+                sheet,
+                start_row=start_row,
+                start_column=start_column,
+                columns=columns,
+                source_rows=list(source_rows or []),
+                end_row=end_row,
+                end_column=end_column,
+            )
+        elif partial:
             header_excel_row = start_row + header_rows - 1
             new_column_count = sum(1 for source, _ in columns if source is None)
             added = 0
@@ -704,6 +721,60 @@ class _XlwingsWriteSession:
             self.write_values_at(sheet, start_row, start_column, values)
 
         self.apply_table_borders(sheet, start_row, start_column, end_row, end_column)
+
+    def _apply_row_partial_table(
+        self,
+        sheet: str | None,
+        *,
+        start_row: int,
+        start_column: int,
+        columns: Sequence[tuple[int | None, list[CellValue]]],
+        source_rows: list[int | None],
+        end_row: int,
+        end_column: int,
+    ) -> None:
+        """Write a row-subset table back, one held row at a time.
+
+        Held rows go to their original Excel rows; sourceless (added) rows are
+        inserted at the bottom edge and sourceless (added) columns at the right
+        edge. Each row is written as a single horizontal span because the held
+        columns are the table's full, contiguous width.
+        """
+
+        added_row_count = sum(1 for source in source_rows if source is None)
+        detected_end_row = end_row - added_row_count
+        added_column_count = sum(1 for source, _ in columns if source is None)
+        detected_end_column = end_column - added_column_count
+
+        # Resolve added rows to freshly inserted bottom-edge Excel rows.
+        resolved_rows: list[int] = []
+        next_row = detected_end_row
+        for source in source_rows:
+            if source is None:
+                next_row += 1
+                self.insert_row(sheet, next_row)
+                resolved_rows.append(next_row)
+            else:
+                resolved_rows.append(source)
+
+        # Added columns are inserted at the right edge; the values themselves
+        # ride along in each row's horizontal span below.
+        next_column = detected_end_column
+        for _ in range(added_column_count):
+            next_column += 1
+            self.insert_column(sheet, next_column)
+
+        # Order columns to match the sheet: sourced columns by their Excel
+        # column, then sourceless (added) columns at the right edge, so the
+        # horizontal write lands each value in the correct column.
+        sourced = sorted(
+            (source, values) for source, values in columns if source is not None
+        )
+        added = [values for source, values in columns if source is None]
+        grid = [values for _, values in sourced] + added
+        for row_index, excel_row in enumerate(resolved_rows):
+            row_values = [column[row_index] for column in grid]
+            self.write_values_at(sheet, excel_row, start_column, [row_values])
 
     def insert_row(self, sheet: str | None, row: int) -> None:
         _validate_position(row, 1)

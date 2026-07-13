@@ -800,6 +800,47 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
   書き戻し位置がずれないよう、**検出直後（または保存直後）のテーブルから派生させてください**
   （元テーブルに未保存の行・列追加がある状態で派生させない）
 
+#### 見出しの値で行・列を絞り込む
+
+`select_columns_by_row()` が「本文行の値」で列を選ぶのに対し、**見出しの値そのもの**で
+絞り込む2つのメソッドもあります。どちらも lambda（または完全一致するプレーン値）で判定します。
+
+- `select_columns_by_column_header(condition)` … **列ヘッダー値**で **列** を絞る
+- `select_rows_by_row_header(condition)` … **行ヘッダー値**で **行** を絞る
+
+```text
+metric   prodA   prodB   prodC   prodD
+sales    120     80      200     50
+rate     0.9     0.6     1.1     0.4
+flag     OK      NG      ok
+```
+
+```python
+from openpyxlwings import ExcelWorkbook
+
+with ExcelWorkbook("report.xlsx", visible=False) as book:
+    table = book.get_bordered_table("Metrics", row=2, column=2, header_columns=1)
+
+    # 列ヘッダーが "prodA"/"prodC" の列だけ（列を絞る）
+    cols = table.select_columns_by_column_header(lambda h: h in ("prodA", "prodC"))
+    print(cols.column_headers)     # [['prodA', 'prodC']]
+
+    # 行ヘッダーが "sales"/"flag" の行だけ（行を絞る）
+    rows = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
+    print(rows.row_headers)        # [['sales'], ['flag']]
+
+    rows.add_row([1, 2, 3, 4], row_headers=["cost"])   # 末尾に行追加
+    rows.add_column([9, 8, 9], column_headers=["extra"])  # 右端に列追加
+    rows.save()   # 絞り込んだ行だけ書き戻し（除外行はそのまま温存）
+```
+
+- `condition` はセル値（複数ヘッダー行/列のときはタプル）を受け取る呼び出し可能オブジェクトか、
+  正規化して完全一致するプレーン値（`match_case=True` で大小区別）
+- 列版は行見出し列を、行版は列見出し行を常に保持します。1つも一致しなければエラー
+- **行版（行サブセット）** は、保持した行を元のExcel行へ書き戻し、除外した行はそのまま残します。
+  追加した行は表の末尾、追加した列は右端に書き込まれます。`add_row`/`add_column`/`save` に対応
+- 列サブセットと行サブセットは相互に連鎖できません（片方に絞った後、もう一方では絞れない）
+
 #### 表の検出条件と、見つからないときのチェックリスト
 
 どちらの指定方法でも、表の範囲は同じ「値または罫線があるセルをたどる」領域探索で
@@ -997,6 +1038,9 @@ from openpyxlwings import ExcelWorkbook, WritePlan
 | `book.get_bordered_table(sheet, *, row=None, column=None, header_values=None, value_header_contains=None, columns="all", header_rows=1, header_columns=0, match_case=False)` | 表を取得する。`row`/`column`（左上セル指定）か `header_values`（見出し指定）のどちらかで表を探す。どちらも罫線不要のゆるい領域探索で、`columns="selected"` で指定列のみの部分テーブルを返す |
 | `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
 | `book.extract(pattern, sheets=None, ranges=None)` | フォーマットに一致する表をすべて抽出する |
+| `table.select_columns_by_row(row_header, condition, *, match_case=False)` | 指定行の値で列を絞った部分テーブルを返す |
+| `table.select_columns_by_column_header(condition, *, match_case=False)` | 列ヘッダー値で列を絞った部分テーブルを返す |
+| `table.select_rows_by_row_header(condition, *, match_case=False)` | 行ヘッダー値で行を絞った部分テーブルを返す（除外行は保存時も温存） |
 | `table.save(path=None)` | 編集した罫線テーブルを書き戻す。`path` 指定で元ファイルを変更せず別ファイルへ保存 |
 | `book.save(path=None)` | 明示的に保存する。`path` 指定で元ファイルを変更せず別ファイルへ保存 |
 | `book.close(save=True)` | 開いている内部セッションを閉じる |

@@ -54,6 +54,8 @@ class BorderTable:
     partial: bool = False
     detected_end_row: int | None = None
     detected_end_column: int | None = None
+    source_rows: list[int | None] | None = None
+    partial_axis: str | None = None
     _original_rows: int = field(init=False, repr=False)
     _original_columns: int = field(init=False, repr=False)
     _insertions: list[_Insertion] = field(default_factory=list, init=False, repr=False)
@@ -63,7 +65,13 @@ class BorderTable:
             self.source_columns = list(
                 range(self.start_column, self.start_column + len(self.columns))
             )
+        if self.source_rows is None:
+            self.source_rows = list(range(self.start_row, self.start_row + self.row_count))
         if self.partial:
+            if self.partial_axis is None:
+                self.partial_axis = "column"
+            if self.partial_axis not in ("column", "row"):
+                raise BorderTableShapeError('partial_axis must be "column" or "row".')
             if self.detected_end_row is None or self.detected_end_column is None:
                 raise BorderTableShapeError(
                     "partial tables require detected_end_row and detected_end_column."
@@ -197,13 +205,7 @@ class BorderTable:
         row = self.find_body_row(row_header)
         table_row_index = self.header_rows + row - 1
 
-        if callable(condition):
-            matches = condition
-        else:
-            expected = _normalize_value(condition, match_case=match_case)
-
-            def matches(value: CellValue) -> bool:
-                return _normalize_value(value, match_case=match_case) == expected
+        matches = _build_matcher(condition, match_case=match_case)
 
         kept_indexes = list(range(self.header_columns))
         kept_indexes.extend(
@@ -224,6 +226,116 @@ class BorderTable:
             header_columns=self.header_columns,
             source_columns=[self.source_columns[index] for index in kept_indexes],
             partial=True,
+            partial_axis="column",
+            detected_end_row=self.end_row,
+            detected_end_column=self.end_column,
+        )
+
+    def select_columns_by_column_header(
+        self,
+        condition: Callable[[CellValue], bool] | CellValue,
+        *,
+        match_case: bool = False,
+    ) -> BorderTable:
+        """Return a partial table of the body columns whose header matches.
+
+        ``condition`` receives each body column's header value: a scalar when
+        there is a single header row, otherwise a top-to-bottom tuple of the
+        column's header values. A plain (non-callable) value is compared like
+        header matching (whitespace-stripped and, unless ``match_case`` is set,
+        case-insensitive). Row-header columns are always kept.
+
+        The result is a column subset, editable and savable like
+        :meth:`select_columns_by_row`.
+        """
+
+        if self.partial and self.partial_axis == "row":
+            raise BorderTableShapeError("cannot column-filter a row-partial table.")
+
+        matches = _build_matcher(condition, match_case=match_case)
+
+        def header_of(index: int) -> CellValue | tuple[CellValue, ...]:
+            if self.header_rows == 1:
+                return self.columns[index][0]
+            return tuple(self.columns[index][row] for row in range(self.header_rows))
+
+        kept_indexes = list(range(self.header_columns))
+        kept_indexes.extend(
+            index
+            for index in range(self.header_columns, self.column_count)
+            if matches(header_of(index))
+        )
+        if len(kept_indexes) == self.header_columns:
+            raise BorderTableShapeError("no body columns matched the condition.")
+
+        return BorderTable(
+            workbook=self.workbook,
+            sheet=self.sheet,
+            start_row=self.start_row,
+            start_column=self.start_column,
+            columns=[list(self.columns[index]) for index in kept_indexes],
+            header_rows=self.header_rows,
+            header_columns=self.header_columns,
+            source_columns=[self.source_columns[index] for index in kept_indexes],
+            source_rows=list(self.source_rows),
+            partial=True,
+            partial_axis="column",
+            detected_end_row=self.end_row,
+            detected_end_column=self.end_column,
+        )
+
+    def select_rows_by_row_header(
+        self,
+        condition: Callable[[CellValue], bool] | CellValue,
+        *,
+        match_case: bool = False,
+    ) -> BorderTable:
+        """Return a partial table of the body rows whose row header matches.
+
+        ``condition`` receives each body row's row-header value: a scalar when
+        there is a single row-header column, otherwise a left-to-right tuple of
+        the row's header values. A plain (non-callable) value is compared like
+        header matching (whitespace-stripped and, unless ``match_case`` is set,
+        case-insensitive). Column-header rows are always kept.
+
+        The result is a row subset: only the matched rows are held, and saving
+        writes them back to their original Excel rows, leaving unmatched rows
+        untouched. ``add_row`` / ``add_column`` and ``save`` are supported.
+        """
+
+        if self.header_columns == 0:
+            raise BorderTableShapeError("table has no row headers.")
+        if self.partial and self.partial_axis == "column":
+            raise BorderTableShapeError("cannot row-filter a column-partial table.")
+
+        matches = _build_matcher(condition, match_case=match_case)
+
+        def header_of(row: int) -> CellValue | tuple[CellValue, ...]:
+            if self.header_columns == 1:
+                return self.columns[0][row]
+            return tuple(self.columns[column][row] for column in range(self.header_columns))
+
+        kept_rows = list(range(self.header_rows))
+        kept_rows.extend(
+            row
+            for row in range(self.header_rows, self.row_count)
+            if matches(header_of(row))
+        )
+        if len(kept_rows) == self.header_rows:
+            raise BorderTableShapeError("no body rows matched the condition.")
+
+        return BorderTable(
+            workbook=self.workbook,
+            sheet=self.sheet,
+            start_row=self.start_row,
+            start_column=self.start_column,
+            columns=[[column[row] for row in kept_rows] for column in self.columns],
+            header_rows=self.header_rows,
+            header_columns=self.header_columns,
+            source_columns=list(self.source_columns),
+            source_rows=[self.source_rows[row] for row in kept_rows],
+            partial=True,
+            partial_axis="row",
             detected_end_row=self.end_row,
             detected_end_column=self.end_column,
         )
@@ -254,6 +366,11 @@ class BorderTable:
         full_row = headers + list(values)
         for column, value in zip(self.columns, full_row, strict=True):
             column.insert(table_row_index, value)
+        self.source_rows.insert(table_row_index, None)
+        if self.partial and self.partial_axis == "row":
+            # Row subset: the new row is the subset axis, placed at the table's
+            # bottom edge on save via its ``None`` source row (no sheet insert).
+            return
         if self.partial and appending:
             # The held grid can be shorter than the detected table, so appended
             # rows go below the original table, past rows inserted earlier.
@@ -314,6 +431,7 @@ class BorderTable:
         table_row_index = insert_index - 1
         for column, value in zip(self.columns, values, strict=True):
             column.insert(table_row_index, value)
+        self.source_rows.insert(table_row_index, None)
         self.header_rows += 1
         self._insertions.append(_Insertion("row", self.start_row + table_row_index))
 
@@ -349,9 +467,24 @@ class BorderTable:
         """
 
         self.workbook._save_bordered_table(self, path)
-        if self.partial:
-            # Rebaseline so a second save does not re-insert the same rows and
-            # columns: appended columns now exist at the table's right edge.
+        if self.partial and self.partial_axis == "row":
+            # Rebaseline the row subset: appended rows now exist at the bottom
+            # edge and appended columns at the right edge, so a second save does
+            # not re-insert them.
+            next_row = self.detected_end_row
+            for index, source in enumerate(self.source_rows):
+                if source is None:
+                    next_row += 1
+                    self.source_rows[index] = next_row
+            self.detected_end_row = next_row
+            next_column = self.detected_end_column
+            for index, source in enumerate(self.source_columns):
+                if source is None:
+                    next_column += 1
+                    self.source_columns[index] = next_column
+            self.detected_end_column = next_column
+        elif self.partial:
+            # Column subset: appended columns now exist at the table's right edge.
             self.detected_end_row += self.added_rows
             next_column = self.detected_end_column
             for index, source in enumerate(self.source_columns):
@@ -379,6 +512,8 @@ class BorderTable:
             raise BorderTableShapeError("table values must be rectangular.")
         if len(self.source_columns) != len(self.columns):
             raise BorderTableShapeError("source_columns length does not match columns.")
+        if len(self.source_rows) != height:
+            raise BorderTableShapeError("source_rows length does not match rows.")
         if self.header_rows < 0 or self.header_columns < 0:
             raise BorderTableShapeError("header counts cannot be negative.")
         if self.header_rows >= height:
@@ -931,6 +1066,35 @@ def _find_first_value_header_column(
 def _normalize_value(value: CellValue, *, match_case: bool) -> str:
     normalized = "" if value is None else str(value).strip()
     return normalized if match_case else normalized.casefold()
+
+
+def _build_matcher(
+    condition: Callable[[object], bool] | object,
+    *,
+    match_case: bool,
+) -> Callable[[object], bool]:
+    """Turn ``condition`` into a predicate over header/cell values.
+
+    A callable is used as-is. A plain value becomes an equality test using the
+    same normalization as header matching (whitespace-stripped and, unless
+    ``match_case`` is set, case-insensitive). Tuple values (multi-header) are
+    compared element-wise.
+    """
+
+    if callable(condition):
+        return condition
+
+    def normalize(value: object) -> object:
+        if isinstance(value, tuple):
+            return tuple(_normalize_value(item, match_case=match_case) for item in value)
+        return _normalize_value(value, match_case=match_case)
+
+    expected = normalize(condition)
+
+    def matches(value: object) -> bool:
+        return normalize(value) == expected
+
+    return matches
 
 
 def _cell_address(row: int, column: int) -> str:

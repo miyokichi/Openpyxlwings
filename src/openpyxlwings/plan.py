@@ -56,15 +56,19 @@ class _BorderedTableOp:
     end_row: int
     end_column: int
     insertions: tuple[tuple[str, int], ...]
+    partial_axis: str | None = None
+    source_rows: tuple[int | None, ...] = ()
 
     def apply(self, writer: _XlwingsWriteSession) -> None:
         writer.apply_bordered_table(
             self.sheet,
             partial=self.partial,
+            partial_axis=self.partial_axis,
             start_row=self.start_row,
             start_column=self.start_column,
             header_rows=self.header_rows,
             columns=[(source, list(values)) for source, values in self.columns],
+            source_rows=list(self.source_rows),
             end_row=self.end_row,
             end_column=self.end_column,
             insertions=self.insertions,
@@ -140,17 +144,19 @@ class WritePlan:
     def add_bordered_table(self, table: BorderTable) -> WritePlan:
         """Queue an edited bordered table to be written back to its position.
 
-        Full and partial (column-selected) tables are both accepted. A snapshot
-        of the table's current values, bounds, and pending row/column
-        insertions is taken now, so later edits to ``table`` do not affect what
-        this plan writes. Unlike :meth:`BorderTable.save`, this neither writes
-        to Excel nor saves until :meth:`ExcelWorkbook.apply` runs.
+        Full and partial tables (column-selected and row-selected) are all
+        accepted. A snapshot of the table's current values, bounds, and pending
+        row/column insertions is taken now, so later edits to ``table`` do not
+        affect what this plan writes. Unlike :meth:`BorderTable.save`, this
+        neither writes to Excel nor saves until :meth:`ExcelWorkbook.apply`
+        runs.
         """
 
         self._ops.append(
             _BorderedTableOp(
                 sheet=table.sheet,
                 partial=table.partial,
+                partial_axis=table.partial_axis,
                 start_row=table.start_row,
                 start_column=table.start_column,
                 header_rows=table.header_rows,
@@ -160,6 +166,7 @@ class WritePlan:
                         table.source_columns, table.columns, strict=True
                     )
                 ),
+                source_rows=tuple(table.source_rows),
                 end_row=table.end_row,
                 end_column=table.end_column,
                 insertions=tuple(
