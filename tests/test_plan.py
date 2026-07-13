@@ -48,6 +48,8 @@ class RecordingWriter:
         end_row,
         end_column,
         insertions,
+        partial_axis=None,
+        source_rows=None,
     ) -> None:
         self.calls.append(
             (

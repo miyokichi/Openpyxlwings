@@ -312,6 +312,247 @@ def test_select_columns_by_row_save_writes_only_selected_columns(tmp_path: Path)
     assert subset.data == [[120, 0.9, "A"], [200, 1.1, "B"]]
 
 
+# --- select_columns_by_column_header ---------------------------------------
+
+
+def test_select_columns_by_column_header_callable(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    subset = table.select_columns_by_column_header(lambda h: h in ("prodA", "prodC"))
+
+    assert subset.partial_axis == "column"
+    assert subset.column_headers == [["prodA", "prodC"]]
+    assert subset.source_columns == [2, 3, 5]  # metric + prodA + prodC
+    assert subset.row_headers == [["sales"], ["rate"], ["flag"]]
+    # data is column-major: one list per kept body column (prodA, prodC).
+    assert subset.data == [[120, 0.9, "OK"], [200, 1.1, "ok"]]
+
+
+def test_select_columns_by_column_header_plain_value(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    subset = table.select_columns_by_column_header("PRODB")  # case-insensitive
+    assert subset.source_columns == [2, 4]
+    assert subset.column_headers == [["prodB"]]
+
+    strict = table.select_columns_by_column_header("prodB", match_case=True)
+    assert strict.source_columns == [2, 4]
+
+
+def test_select_columns_by_column_header_multi_header_rows() -> None:
+    # Two column-header rows: the condition receives a tuple per column.
+    table = BorderTable(
+        workbook=None,
+        sheet="S",
+        start_row=1,
+        start_column=1,
+        columns=[
+            ["", "", "East", "West"],  # corner (2 rows) + row headers East/West
+            ["2026", "Q1", 10, 40],  # column header (2026, Q1), body 10/40
+            ["2026", "Q2", 20, 50],  # (2026, Q2)
+            ["2027", "Q1", 30, 60],  # (2027, Q1)
+        ],
+        header_rows=2,
+        header_columns=1,
+    )
+
+    subset = table.select_columns_by_column_header(lambda h: h[0] == "2026")
+
+    assert subset.source_columns == [1, 2, 3]  # row-header col + the two 2026 columns
+    assert subset.data == [[10, 40], [20, 50]]
+
+
+def test_select_columns_by_column_header_rejects_no_match(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    with pytest.raises(BorderTableShapeError, match="no body columns matched"):
+        table.select_columns_by_column_header(lambda h: False)
+
+
+def test_select_columns_by_column_header_rejects_row_partial(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+    row_subset = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
+
+    with pytest.raises(BorderTableShapeError, match="cannot column-filter"):
+        row_subset.select_columns_by_column_header(lambda h: True)
+
+
+# --- select_rows_by_row_header ---------------------------------------------
+
+
+def test_select_rows_by_row_header_callable(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    subset = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
+
+    assert subset.partial_axis == "row"
+    assert subset.row_headers == [["sales"], ["flag"]]
+    assert subset.source_rows == [2, 3, 5]  # header row 2, sales row 3, flag row 5
+    assert subset.source_columns == [2, 3, 4, 5, 6]  # every column kept
+    assert subset.column_headers == [["prodA", "prodB", "prodC", "prodD"]]
+    assert subset.data == [[120, "OK"], [80, "NG"], [200, "ok"], [50, None]]
+
+
+def test_select_rows_by_row_header_plain_value(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    subset = table.select_rows_by_row_header("RATE")  # case-insensitive
+    assert subset.source_rows == [2, 4]
+    assert subset.row_headers == [["rate"]]
+
+
+def test_select_rows_by_row_header_multi_column_headers() -> None:
+    table = BorderTable(
+        workbook=None,
+        sheet="S",
+        start_row=1,
+        start_column=1,
+        columns=[
+            ["region", "East", "East", "West"],
+            ["segment", "Retail", "Corp", "Retail"],
+            ["sales", 10, 20, 30],
+        ],
+        header_rows=1,
+        header_columns=2,
+    )
+
+    subset = table.select_rows_by_row_header(lambda h: h[0] == "East")
+
+    assert subset.source_rows == [1, 2, 3]
+    assert subset.row_headers == [["East", "Retail"], ["East", "Corp"]]
+    assert subset.data == [[10, 20]]
+
+
+def test_select_rows_by_row_header_rejects_no_match(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    with pytest.raises(BorderTableShapeError, match="no body rows matched"):
+        table.select_rows_by_row_header(lambda h: False)
+
+
+def test_select_rows_by_row_header_requires_row_headers(tmp_path: Path) -> None:
+    path = tmp_path / "book.xlsx"
+    _write_grid(path, "NoRowHeaders", [["a", "b"], [1, 2], [3, 4]])
+    with ExcelWorkbook(path) as workbook:
+        table = workbook.get_bordered_table("NoRowHeaders", row=2, column=2, header_columns=0)
+
+    with pytest.raises(BorderTableShapeError, match="no row headers"):
+        table.select_rows_by_row_header(lambda h: True)
+
+
+def test_select_rows_by_row_header_rejects_column_partial(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+    col_subset = table.select_columns_by_column_header(lambda h: h in ("prodA", "prodC"))
+
+    with pytest.raises(BorderTableShapeError, match="cannot row-filter"):
+        col_subset.select_rows_by_row_header(lambda h: True)
+
+
+def test_select_rows_by_row_header_edits_do_not_affect_parent(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    subset = table.select_rows_by_row_header(lambda h: h == "sales")
+    subset.set_body_value(1, 1, 999)
+
+    assert subset.data[0][0] == 999
+    assert table.data[0][0] == 120
+
+
+def test_select_rows_by_row_header_add_row_and_column(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+
+    subset = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
+    subset.add_row([1, 2, 3, 4], row_headers=["cost"])
+    subset.add_column([9, 8, 9], column_headers=["extra"])
+
+    assert subset.added_rows == 1
+    assert subset.added_columns == 1
+    assert subset.source_rows == [2, 3, 5, None]
+    assert subset.source_columns[-1] is None
+    assert subset.end_row == 6  # detected bottom (5) + 1 appended row
+    assert subset.end_column == 7  # detected right (6) + 1 appended column
+    assert subset.row_headers == [["sales"], ["flag"], ["cost"]]
+    assert [column[-1] for column in subset.data] == [1, 2, 3, 4, 9]
+
+
+def test_select_rows_by_row_header_save_writes_kept_rows(tmp_path: Path) -> None:
+    # A row-partial save must write each kept row to its original Excel row,
+    # append added rows at the bottom and added columns at the right, and leave
+    # unmatched rows untouched.
+    class RecordingWriter(_XlwingsWriteSession):
+        def __init__(self) -> None:
+            self.ops: list[tuple] = []
+
+        def insert_row(self, sheet, row) -> None:
+            self.ops.append(("insert_row", row))
+
+        def insert_column(self, sheet, column) -> None:
+            self.ops.append(("insert_column", column))
+
+        def write_values_at(self, sheet, row, column, values, *, expand=False) -> None:
+            self.ops.append(("write", row, column, values))
+
+        def apply_table_borders(self, sheet, sr, sc, er, ec) -> None:
+            self.ops.append(("borders", sr, sc, er, ec))
+
+        def save(self, path=None) -> None:
+            self.ops.append(("save", path))
+
+    table = load_metrics_table(tmp_path / "book.xlsx")
+    subset = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
+    subset.add_row([1, 2, 3, 4], row_headers=["cost"])
+    subset.add_column([9, 8, 9], column_headers=["extra"])
+
+    writer = RecordingWriter()
+    writer.save_bordered_table(subset, None)
+
+    assert writer.ops == [
+        ("insert_row", 6),  # added "cost" row at the bottom edge
+        ("insert_column", 7),  # added "extra" column at the right edge
+        ("write", 2, 2, [["metric", "prodA", "prodB", "prodC", "prodD", "extra"]]),
+        ("write", 3, 2, [["sales", 120, 80, 200, 50, 9]]),  # sales at its row
+        ("write", 5, 2, [["flag", "OK", "NG", "ok", None, 8]]),  # flag; rate (row 4) untouched
+        ("write", 6, 2, [["cost", 1, 2, 3, 4, 9]]),  # appended row
+        ("borders", 2, 2, 6, 7),
+        ("save", None),
+    ]
+
+
+def test_select_rows_by_row_header_save_rebaselines(tmp_path: Path) -> None:
+    class FakeWorkbook:
+        def _save_bordered_table(self, table: BorderTable, path=None) -> None:
+            pass
+
+    table = load_metrics_table(tmp_path / "book.xlsx")
+    table.workbook = FakeWorkbook()
+    subset = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
+    subset.add_row([1, 2, 3, 4], row_headers=["cost"])
+    subset.add_column([9, 8, 9], column_headers=["extra"])
+    subset.save()
+
+    assert subset.added_rows == 0
+    assert subset.added_columns == 0
+    assert subset.source_rows == [2, 3, 5, 6]  # appended row now lives at row 6
+    assert subset.source_columns == [2, 3, 4, 5, 6, 7]  # appended column at col 7
+    assert subset.detected_end_row == 6
+    assert subset.detected_end_column == 7
+
+
+def test_write_plan_snapshots_row_partial_table(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+    subset = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
+
+    plan = WritePlan()
+    plan.add_bordered_table(subset)
+
+    subset.add_row([1, 2, 3, 4], row_headers=["cost"])  # must not change snapshot
+
+    op = next(iter(plan))
+    assert isinstance(op, _BorderedTableOp)
+    assert op.partial_axis == "row"
+    assert op.source_rows == (2, 3, 5)
+
+
 def test_selected_columns_read_borderless_values(tmp_path: Path) -> None:
     # Column selection no longer needs any borders; the body of each column
     # is read while values continue.
