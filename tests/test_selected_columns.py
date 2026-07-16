@@ -65,7 +65,7 @@ def test_selects_only_requested_header_column(tmp_path: Path) -> None:
 
     assert table.partial is True
     assert [column[0] for column in table.columns] == ["header1"]
-    assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
+    assert table.row_headers == ["col1a", "col2a", "col3a"]
     assert table.data == []  # every held column is a row-header column
     assert table.row_count == 4  # header row + 3 body rows
 
@@ -83,8 +83,8 @@ def test_value_header_contains_selects_every_amount_column(tmp_path: Path) -> No
         )
 
     # header2 is not requested, so it is excluded; both amount columns appear.
-    assert table.column_headers == [["amount", "amount"]]
-    assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
+    assert table.column_headers == ["amount", "amount"]
+    assert table.row_headers == ["col1a", "col2a", "col3a"]
     assert table.data == [[100, 300, 500], [200, 400, 600]]
     # Each held column remembers its source Excel column (B, C, D).
     assert table.source_columns == [2, 4, 5]
@@ -111,7 +111,7 @@ def test_continuation_includes_bordered_empty_cell(tmp_path: Path) -> None:
             columns="selected",
         )
 
-    assert table.row_headers == [["a"], ["b"], ["c"]]
+    assert table.row_headers == ["a", "b", "c"]
     assert table.data == [[100, None, 300]]
 
 
@@ -139,7 +139,7 @@ def test_header_on_second_table_row_keeps_title_row(tmp_path: Path) -> None:
 
     assert table.header_rows == 2
     assert table.columns == [["Title", "key", "a", "b"], [None, "amount", 100, 200]]
-    assert table.row_headers == [["a"], ["b"]]
+    assert table.row_headers == ["a", "b"]
     assert table.data == [[100, 200]]
 
 
@@ -160,7 +160,7 @@ def test_ragged_columns_are_padded_with_none() -> None:
     )
 
     assert table.row_count == 4
-    assert table.row_headers == [["a"], ["b"], ["c"]]
+    assert table.row_headers == ["a", "b", "c"]
     assert table.data == [[100, None, None]]
 
 
@@ -204,7 +204,7 @@ def test_decoy_first_header_on_same_row_is_skipped(tmp_path: Path) -> None:
 
     assert table.source_columns == [4]
     assert [column[0] for column in table.columns] == ["header1"]
-    assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
+    assert table.row_headers == ["col1a", "col2a", "col3a"]
 
 
 def make_metrics_workbook(path: Path) -> None:
@@ -233,8 +233,8 @@ def test_select_columns_by_row_with_callable_condition(tmp_path: Path) -> None:
 
     assert subset.partial is True
     assert subset.source_columns == [2, 3, 5]  # metric + prodA + prodC
-    assert subset.column_headers == [["prodA", "prodC"]]
-    assert subset.row_headers == [["sales"], ["rate"], ["flag"]]
+    assert subset.column_headers == ["prodA", "prodC"]
+    assert subset.row_headers == ["sales", "rate", "flag"]
     assert subset.data == [[120, 0.9, "OK"], [200, 1.1, "ok"]]
     assert subset.detected_end_row == table.end_row
     assert subset.detected_end_column == table.end_column
@@ -247,7 +247,7 @@ def test_select_columns_by_row_with_plain_value_condition(tmp_path: Path) -> Non
     subset = table.select_columns_by_row("flag", "ok")
 
     assert subset.source_columns == [2, 3, 5]
-    assert subset.column_headers == [["prodA", "prodC"]]
+    assert subset.column_headers == ["prodA", "prodC"]
 
     strict = table.select_columns_by_row("flag", "ok", match_case=True)
     assert strict.source_columns == [2, 5]
@@ -321,9 +321,9 @@ def test_select_columns_by_column_header_callable(tmp_path: Path) -> None:
     subset = table.select_columns_by_column_header(lambda h: h in ("prodA", "prodC"))
 
     assert subset.partial_axis == "column"
-    assert subset.column_headers == [["prodA", "prodC"]]
+    assert subset.column_headers == ["prodA", "prodC"]
     assert subset.source_columns == [2, 3, 5]  # metric + prodA + prodC
-    assert subset.row_headers == [["sales"], ["rate"], ["flag"]]
+    assert subset.row_headers == ["sales", "rate", "flag"]
     # data is column-major: one list per kept body column (prodA, prodC).
     assert subset.data == [[120, 0.9, "OK"], [200, 1.1, "ok"]]
 
@@ -333,7 +333,7 @@ def test_select_columns_by_column_header_plain_value(tmp_path: Path) -> None:
 
     subset = table.select_columns_by_column_header("PRODB")  # case-insensitive
     assert subset.source_columns == [2, 4]
-    assert subset.column_headers == [["prodB"]]
+    assert subset.column_headers == ["prodB"]
 
     strict = table.select_columns_by_column_header("prodB", match_case=True)
     assert strict.source_columns == [2, 4]
@@ -356,9 +356,13 @@ def test_select_columns_by_column_header_multi_header_rows() -> None:
         header_columns=1,
     )
 
+    # Multi-row column headers come back as one tuple per body column.
+    assert table.column_headers == [("2026", "Q1"), ("2026", "Q2"), ("2027", "Q1")]
+
     subset = table.select_columns_by_column_header(lambda h: h[0] == "2026")
 
     assert subset.source_columns == [1, 2, 3]  # row-header col + the two 2026 columns
+    assert subset.column_headers == [("2026", "Q1"), ("2026", "Q2")]
     assert subset.data == [[10, 40], [20, 50]]
 
 
@@ -386,10 +390,10 @@ def test_select_rows_by_row_header_callable(tmp_path: Path) -> None:
     subset = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
 
     assert subset.partial_axis == "row"
-    assert subset.row_headers == [["sales"], ["flag"]]
+    assert subset.row_headers == ["sales", "flag"]
     assert subset.source_rows == [2, 3, 5]  # header row 2, sales row 3, flag row 5
     assert subset.source_columns == [2, 3, 4, 5, 6]  # every column kept
-    assert subset.column_headers == [["prodA", "prodB", "prodC", "prodD"]]
+    assert subset.column_headers == ["prodA", "prodB", "prodC", "prodD"]
     assert subset.data == [[120, "OK"], [80, "NG"], [200, "ok"], [50, None]]
 
 
@@ -398,7 +402,7 @@ def test_select_rows_by_row_header_plain_value(tmp_path: Path) -> None:
 
     subset = table.select_rows_by_row_header("RATE")  # case-insensitive
     assert subset.source_rows == [2, 4]
-    assert subset.row_headers == [["rate"]]
+    assert subset.row_headers == ["rate"]
 
 
 def test_select_rows_by_row_header_multi_column_headers() -> None:
@@ -419,7 +423,7 @@ def test_select_rows_by_row_header_multi_column_headers() -> None:
     subset = table.select_rows_by_row_header(lambda h: h[0] == "East")
 
     assert subset.source_rows == [1, 2, 3]
-    assert subset.row_headers == [["East", "Retail"], ["East", "Corp"]]
+    assert subset.row_headers == [("East", "Retail"), ("East", "Corp")]
     assert subset.data == [[10, 20]]
 
 
@@ -471,7 +475,7 @@ def test_select_rows_by_row_header_add_row_and_column(tmp_path: Path) -> None:
     assert subset.source_columns[-1] is None
     assert subset.end_row == 6  # detected bottom (5) + 1 appended row
     assert subset.end_column == 7  # detected right (6) + 1 appended column
-    assert subset.row_headers == [["sales"], ["flag"], ["cost"]]
+    assert subset.row_headers == ["sales", "flag", "cost"]
     assert [column[-1] for column in subset.data] == [1, 2, 3, 4, 9]
 
 
@@ -579,7 +583,7 @@ def test_selected_columns_read_borderless_values(tmp_path: Path) -> None:
         )
 
     assert table.source_columns == [2, 4]
-    assert table.row_headers == [["col1a"], ["col2a"]]
+    assert table.row_headers == ["col1a", "col2a"]
     assert table.data == [[100, 300]]
 
 
@@ -611,7 +615,7 @@ def test_add_row_and_add_column_update_partial_table(tmp_path: Path) -> None:
     assert table.end_row == 6  # detected bottom (row 5) plus one appended row
 
     table.add_column([1, 2, 3, 4], column_headers=["ratio"])
-    assert table.column_headers == [["amount", "amount", "ratio"]]
+    assert table.column_headers == ["amount", "amount", "ratio"]
     assert table.source_columns[-1] is None
     assert table.added_columns == 1
     assert [column[0] for column in table.data] == [100, 200, 1]
@@ -629,7 +633,7 @@ def test_find_body_row_and_set_body_row_by_header(tmp_path: Path) -> None:
             columns="selected",
         )
 
-    assert table.row_headers == [["col1a"], ["col2a"], ["col3a"]]
+    assert table.row_headers == ["col1a", "col2a", "col3a"]
     assert table.find_body_row("col2a") == 2
 
     table.set_body_row_by_header("col1a", [111, 222])

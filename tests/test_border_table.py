@@ -72,8 +72,8 @@ def test_get_bordered_table_detects_range_and_headers(tmp_path: Path) -> None:
         ["2026", "Sales", 10, 30],
         ["2027", "Sales", 20, 40],
     ]
-    assert table.column_headers == [["2026", "2027"], ["Sales", "Sales"]]
-    assert table.row_headers == [["East"], ["West"]]
+    assert table.column_headers == [("2026", "Sales"), ("2027", "Sales")]
+    assert table.row_headers == ["East", "West"]
     assert table.data == [[10, 30], [20, 40]]
 
 
@@ -91,11 +91,11 @@ def test_get_bordered_table_by_header_detects_variable_amount_columns(tmp_path: 
     assert table.range == "B2:E5"
     assert table.header_rows == 1
     assert table.header_columns == 2
-    assert table.column_headers == [["amount", "amount"]]
+    assert table.column_headers == ["amount", "amount"]
     assert table.row_headers == [
-        ["header_col1", "header2_col1"],
-        ["header_col2", "header2_col2"],
-        ["header_col3", "header2_col3"],
+        ("header_col1", "header2_col1"),
+        ("header_col2", "header2_col2"),
+        ("header_col3", "header2_col3"),
     ]
     assert table.data == [[100, 300, 500], [200, 400, 600]]
 

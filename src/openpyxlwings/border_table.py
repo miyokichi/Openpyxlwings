@@ -120,19 +120,51 @@ class BorderTable:
         return [column[self.header_rows :] for column in self.columns[self.header_columns :]]
 
     @property
-    def row_headers(self) -> Table:
+    def row_headers(self) -> list[CellValue | tuple[CellValue, ...]]:
+        """Row-header value(s) per body row.
+
+        With a single row-header column each entry is the plain value; with
+        several it is a left-to-right tuple. An empty list when there are no
+        row headers.
+        """
+
         if self.header_columns == 0:
             return []
+        keys = self._row_header_keys()
+        if self.header_columns == 1:
+            return [key[0] for key in keys]
+        return list(keys)
+
+    @property
+    def column_headers(self) -> list[CellValue | tuple[CellValue, ...]]:
+        """Column-header value(s) per body column.
+
+        With a single column-header row each entry is the plain value; with
+        several it is a top-to-bottom tuple. An empty list when there are no
+        column headers or no body columns.
+        """
+
+        if self.header_rows == 0:
+            return []
+        keys = self._column_header_keys()
+        if self.header_rows == 1:
+            return [key[0] for key in keys]
+        return list(keys)
+
+    def _row_header_keys(self) -> list[tuple[CellValue, ...]]:
+        """Each body row's row-header values as a tuple (length header_columns)."""
+
         return [
-            [column[row] for column in self.columns[: self.header_columns]]
+            tuple(column[row] for column in self.columns[: self.header_columns])
             for row in range(self.header_rows, self.row_count)
         ]
 
-    @property
-    def column_headers(self) -> Table:
+    def _column_header_keys(self) -> list[tuple[CellValue, ...]]:
+        """Each body column's column-header values as a tuple (length header_rows)."""
+
         return [
-            [column[row] for column in self.columns[self.header_columns :]]
-            for row in range(self.header_rows)
+            tuple(column[row] for row in range(self.header_rows))
+            for column in self.columns[self.header_columns :]
         ]
 
     def set_value(self, row: int, column: int, value: CellValue) -> None:
@@ -155,8 +187,8 @@ class BorderTable:
         expected = self._normalize_row_header(row_header)
         matches = [
             index
-            for index, actual in enumerate(self.row_headers, start=1)
-            if tuple(actual) == expected
+            for index, actual in enumerate(self._row_header_keys(), start=1)
+            if actual == expected
         ]
         if not matches:
             raise BorderTableShapeError("row_header was not found.")

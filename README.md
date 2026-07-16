@@ -516,6 +516,11 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
 `table.data` は見出しを除いた本体を **列ごとのリスト**（列方向優先）で返します。
 
+`table.row_headers` は本文行ごと、`table.column_headers` は本文列ごとの見出しを返します。
+見出しが1段（`header_columns` または `header_rows` が1）なら `["East", "West"]` のように
+**値のリスト**、複数段なら `[("2026", "Sales"), ("2027", "Sales")]` のように
+**タプルのリスト**になります。
+
 `get_bordered_table()` は表の探し方が2通りあり、引数の組み合わせで切り替えます。
 
 | 引数 | 内容 |
@@ -709,8 +714,8 @@ with ExcelWorkbook("report.xlsx") as book:
         columns="selected",
     )
 
-    print(table.column_headers)   # [['amount', 'amount']]（値列の見出し。header2 は含まれない）
-    print(table.row_headers)      # [['header_col1'], ['header_col2'], ['header_col3']]
+    print(table.column_headers)   # ['amount', 'amount']（値列の見出し。header2 は含まれない）
+    print(table.row_headers)      # ['header_col1', 'header_col2', 'header_col3']
     print(table.data)             # [[100, 300, 500], [200, 400, 600]]（値列を列ごとのリストで）
     print(table.source_columns)   # 各列の元のExcel列番号。メモリ上で追加した列は None
 
@@ -782,7 +787,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
     # rate 行が 0.8 以上の列だけを持つ部分テーブル
     subset = table.select_columns_by_row("rate", lambda v: v is not None and v >= 0.8)
 
-    print(subset.column_headers)   # [['prodA', 'prodC']]
+    print(subset.column_headers)   # ['prodA', 'prodC']
     print(subset.source_columns)   # 各列の元のExcel列番号
 
     subset.set_body_row_by_header("sales", [150, 210])
@@ -823,11 +828,11 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
     # 列ヘッダーが "prodA"/"prodC" の列だけ（列を絞る）
     cols = table.select_columns_by_column_header(lambda h: h in ("prodA", "prodC"))
-    print(cols.column_headers)     # [['prodA', 'prodC']]
+    print(cols.column_headers)     # ['prodA', 'prodC']
 
     # 行ヘッダーが "sales"/"flag" の行だけ（行を絞る）
     rows = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
-    print(rows.row_headers)        # [['sales'], ['flag']]
+    print(rows.row_headers)        # ['sales', 'flag']
 
     rows.add_row([1, 2, 3, 4], row_headers=["cost"])   # 末尾に行追加
     rows.add_column([9, 8, 9], column_headers=["extra"])  # 右端に列追加
