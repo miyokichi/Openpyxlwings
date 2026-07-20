@@ -595,7 +595,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 なお別名保存すると、それ以降このセッションの保存先は新しいファイルに切り替わるため、
 続けて `table.save()`（パス省略）を呼ぶと同じ新ファイルへ保存されます。
 
-行見出しで本文行を探して、行全体を差し替えることもできます。
+行見出しで本文行を探し、本文の値を読み取ったり、行全体を差し替えたりできます。
 
 ```python
 from openpyxlwings import ExcelWorkbook
@@ -606,6 +606,9 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
     row = table.find_body_row("東日本")
     print(row)
 
+    values = table.get_body_row_by_header("東日本")
+    print(values)  # 行見出し列を除いた本文値
+
     table.set_body_row_by_header("東日本", [1200, 980, 760])
 
     table.save()
@@ -613,6 +616,23 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
 行見出し列が複数ある場合は、`("東日本", "法人")` のようにすべての行見出し値を指定します。
 同じ行見出しに複数行が一致する場合は、誤更新を避けるためエラーになります。
+`get_body_row_by_header()` は新しいリストを返すため、戻り値を書き換えてもテーブル自体は変わりません。
+
+`WritePlan` を使う場合は、行を書き換えた後のテーブルを通常どおり予約します。
+予約時点でテーブル全体がコピーされるため、その後で同じテーブルを変更しても予約済みの値は変わりません。
+
+```python
+from openpyxlwings import ExcelWorkbook, WritePlan
+
+plan = WritePlan()
+with ExcelWorkbook("report.xlsx") as book:
+    table = book.get_bordered_table(
+        "Report", row=5, column=3, header_rows=1, header_columns=1
+    )
+    table.set_body_row_by_header("東日本", [1200, 980, 760])
+    plan.add_bordered_table(table)
+    book.apply(plan)
+```
 
 #### 行や列を追加する
 
@@ -744,7 +764,7 @@ with ExcelWorkbook("report.xlsx") as book:
 
 #### 部分テーブルでも行見出しで本文行を探す
 
-`find_body_row()` / `set_body_row_by_header()` は部分テーブルでも同じように使えます。
+`find_body_row()` / `get_body_row_by_header()` / `set_body_row_by_header()` は部分テーブルでも同じように使えます。
 行見出しとして扱われるのは `header_values` で指定した列（完全一致で選んだ列）で、
 `value_header_contains` で選んだ列は本文（値）列として扱われます。
 
@@ -761,6 +781,9 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
 
     row = table.find_body_row("header_col1")
     print(row)
+
+    values = table.get_body_row_by_header("header_col1")
+    print(values)  # 選択された本文列の値だけを返す
 
     table.set_body_row_by_header("header_col1", [1200, 980])
 
@@ -798,7 +821,7 @@ with ExcelWorkbook("report.xlsx", visible=False) as book:
   **プレーンな値**（見出し比較と同じ正規化＝前後空白除去・大文字小文字無視で完全一致。
   `match_case=True` で大小区別）を渡せます
 - 行見出し列（先頭 `header_columns` 列）は常に保持されるので、絞り込み後も
-  `find_body_row()` / `set_body_row_by_header()` がそのまま使えます
+  `find_body_row()` / `get_body_row_by_header()` / `set_body_row_by_header()` がそのまま使えます
 - 1列も条件に合わない場合はエラーになります
 - 元になるテーブルは全体・部分どちらでもよく、部分テーブルから更に絞り込むこともできます
 - 値はコピーされるため、絞り込み後のテーブルを編集しても元のテーブルは変わりません。
@@ -1043,6 +1066,9 @@ from openpyxlwings import ExcelWorkbook, WritePlan
 | `book.get_bordered_table(sheet, *, row=None, column=None, header_values=None, value_header_contains=None, columns="all", header_rows=1, header_columns=0, match_case=False)` | 表を取得する。`row`/`column`（左上セル指定）か `header_values`（見出し指定）のどちらかで表を探す。どちらも罫線不要のゆるい領域探索で、`columns="selected"` で指定列のみの部分テーブルを返す |
 | `ExcelFormat.load(path)` | Excelフォーマットブックを読み込む |
 | `book.extract(pattern, sheets=None, ranges=None)` | フォーマットに一致する表をすべて抽出する |
+| `table.find_body_row(row_header)` | 行見出しに一致する本文行の1始まり位置を返す |
+| `table.get_body_row_by_header(row_header)` | 行見出しに一致する行の本文値を新しいリストで返す |
+| `table.set_body_row_by_header(row_header, values)` | 行見出しに一致する行の本文値を置き換える。`WritePlan` では変更後に `plan.add_bordered_table(table)` で予約する |
 | `table.select_columns_by_row(row_header, condition, *, match_case=False)` | 指定行の値で列を絞った部分テーブルを返す |
 | `table.select_columns_by_column_header(condition, *, match_case=False)` | 列ヘッダー値で列を絞った部分テーブルを返す |
 | `table.select_rows_by_row_header(condition, *, match_case=False)` | 行ヘッダー値で行を絞った部分テーブルを返す（除外行は保存時も温存） |

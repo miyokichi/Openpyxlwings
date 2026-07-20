@@ -303,6 +303,7 @@ def test_select_columns_by_row_save_writes_only_selected_columns(tmp_path: Path)
     table.workbook = fake
 
     subset = table.select_columns_by_row("rate", lambda v: v is not None and v >= 0.8)
+    assert subset.get_body_row_by_header("sales") == [120, 200]
     subset.set_body_row_by_header("flag", ["A", "B"])
     subset.save()
 
@@ -395,6 +396,10 @@ def test_select_rows_by_row_header_callable(tmp_path: Path) -> None:
     assert subset.source_columns == [2, 3, 4, 5, 6]  # every column kept
     assert subset.column_headers == ["prodA", "prodB", "prodC", "prodD"]
     assert subset.data == [[120, "OK"], [80, "NG"], [200, "ok"], [50, None]]
+    assert subset.get_body_row_by_header("flag") == ["OK", "NG", "ok", None]
+
+    subset.set_body_row_by_header("sales", [121, 81, 201, 51])
+    assert subset.get_body_row_by_header("sales") == [121, 81, 201, 51]
 
 
 def test_select_rows_by_row_header_plain_value(tmp_path: Path) -> None:
@@ -545,16 +550,20 @@ def test_select_rows_by_row_header_save_rebaselines(tmp_path: Path) -> None:
 def test_write_plan_snapshots_row_partial_table(tmp_path: Path) -> None:
     table = load_metrics_table(tmp_path / "book.xlsx")
     subset = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
+    subset.set_body_row_by_header("sales", [121, 81, 201, 51])
 
     plan = WritePlan()
     plan.add_bordered_table(subset)
 
+    subset.set_body_row_by_header("sales", [999, 999, 999, 999])
     subset.add_row([1, 2, 3, 4], row_headers=["cost"])  # must not change snapshot
 
     op = next(iter(plan))
     assert isinstance(op, _BorderedTableOp)
     assert op.partial_axis == "row"
     assert op.source_rows == (2, 3, 5)
+    assert op.columns[1][1][1] == 121
+    assert op.columns[4][1][1] == 51
 
 
 def test_selected_columns_read_borderless_values(tmp_path: Path) -> None:
@@ -635,6 +644,11 @@ def test_find_body_row_and_set_body_row_by_header(tmp_path: Path) -> None:
 
     assert table.row_headers == ["col1a", "col2a", "col3a"]
     assert table.find_body_row("col2a") == 2
+    values = table.get_body_row_by_header("col2a")
+    assert values == [300, 400]
+
+    values[0] = 999
+    assert table.get_body_row_by_header("col2a") == [300, 400]
 
     table.set_body_row_by_header("col1a", [111, 222])
 
@@ -778,11 +792,14 @@ def test_writer_save_bordered_table_forwards_path_to_save() -> None:
 
 def test_write_plan_snapshots_partial_table() -> None:
     table = make_partial_table()
+    assert table.get_body_row_by_header("b") == [200]
+    table.set_body_row_by_header("b", [250])
 
     plan = WritePlan()
     plan.add_bordered_table(table)
 
     # Mutating the table afterwards must not change the queued operation.
+    table.set_body_row_by_header("b", [999])
     table.add_row([300], row_headers=["c"])
     table.add_column([9, 9, 9], column_headers=["extra"])
 
@@ -793,5 +810,5 @@ def test_write_plan_snapshots_partial_table() -> None:
     assert op.insertions == ()
     assert op.columns == (
         (2, ("key", "a", "b")),
-        (3, ("amount", 100, 200)),
+        (3, ("amount", 100, 250)),
     )

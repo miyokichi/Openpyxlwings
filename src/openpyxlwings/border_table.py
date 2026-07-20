@@ -196,6 +196,25 @@ class BorderTable:
             raise BorderTableShapeError("row_header matches multiple body rows.")
         return matches[0]
 
+    def get_body_row_by_header(
+        self,
+        row_header: CellValue | list[CellValue] | tuple[CellValue, ...],
+    ) -> list[CellValue]:
+        """Return the body values of the row selected by ``row_header``.
+
+        Row-header columns are excluded. For a column-partial table, only the
+        held body columns are returned; for a row-partial table, lookup is
+        limited to the held rows. A new list is returned so callers cannot
+        mutate the table accidentally.
+        """
+
+        row = self.find_body_row(row_header)
+        table_row_index = self.header_rows + row - 1
+        return [
+            column[table_row_index]
+            for column in self.columns[self.header_columns :]
+        ]
+
     def set_body_row_by_header(
         self,
         row_header: CellValue | list[CellValue] | tuple[CellValue, ...],

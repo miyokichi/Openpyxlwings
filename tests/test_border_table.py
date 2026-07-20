@@ -239,6 +239,7 @@ def test_border_table_sets_body_row_by_single_row_header(tmp_path: Path) -> None
         table = workbook.get_bordered_table("Report", row=2, column=2, header_rows=2, header_columns=1)
 
     assert table.find_body_row("West") == 2
+    assert table.get_body_row_by_header("West") == [30, 40]
 
     table.set_body_row_by_header("East", [11, 22])
 
@@ -262,6 +263,7 @@ def test_border_table_sets_body_row_by_multi_column_row_header() -> None:
     )
 
     assert table.find_body_row(["East", "Enterprise"]) == 2
+    assert table.get_body_row_by_header(("East", "Enterprise")) == [20, 8]
 
     table.set_body_row_by_header(("East", "Enterprise"), [25, 10])
 
@@ -303,7 +305,7 @@ def test_border_table_rejects_bad_row_header_updates() -> None:
         table.find_body_row("East")
 
     with pytest.raises(BorderTableShapeError, match="was not found"):
-        table.find_body_row("West")
+        table.get_body_row_by_header("West")
 
     with pytest.raises(BorderTableShapeError, match="row values length"):
         table.set_body_row_by_header("East", [1, 2])

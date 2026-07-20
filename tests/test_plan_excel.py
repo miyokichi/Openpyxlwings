@@ -139,9 +139,11 @@ def test_bordered_table_edit_via_plan_lands_on_disk(tmp_path: Path, excel_app) -
     # session; the edits accumulate in memory until apply().
     with ExcelWorkbook(path) as book:
         table = book.get_bordered_table("Report", row=2, column=2, header_rows=1, header_columns=1)
-        table.set_value(row=2, column=2, value=99)        # East sales 10 -> 99
+        assert table.get_body_row_by_header("East") == [10]
+        table.set_body_row_by_header("East", [99])
         table.add_row([50], row_headers=["South"])
         plan.add_bordered_table(table)
+        table.set_body_row_by_header("East", [999])  # queued value stays 99
 
     with ExcelWorkbook(path, app=excel_app) as book:
         book.apply(plan)
