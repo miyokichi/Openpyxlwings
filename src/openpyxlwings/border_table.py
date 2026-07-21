@@ -234,6 +234,9 @@ class BorderTable:
         bounds match the sheet.
         """
 
+        if self.partial and self.partial_axis == "row":
+            raise BorderTableShapeError("cannot column-filter a row-partial table.")
+
         row = self.find_body_row(row_header)
         table_row_index = self.header_rows + row - 1
 

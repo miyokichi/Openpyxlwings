@@ -290,6 +290,14 @@ def test_select_columns_by_row_rejects_no_match(tmp_path: Path) -> None:
         table.select_columns_by_row("nope", lambda value: True)
 
 
+def test_select_columns_by_row_rejects_row_partial(tmp_path: Path) -> None:
+    table = load_metrics_table(tmp_path / "book.xlsx")
+    row_subset = table.select_rows_by_row_header(lambda h: h in ("sales", "flag"))
+
+    with pytest.raises(BorderTableShapeError, match="cannot column-filter"):
+        row_subset.select_columns_by_row("sales", lambda v: True)
+
+
 def test_select_columns_by_row_save_writes_only_selected_columns(tmp_path: Path) -> None:
     class FakeWorkbook:
         def __init__(self) -> None:
